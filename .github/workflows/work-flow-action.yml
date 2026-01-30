@@ -133,6 +133,11 @@ jobs:
             cp "$1" "$dest"
           ' _ {} \;
 
+      - name: Remove Markdown fences only
+        shell: bash
+        run: |
+          find src/test/java -type f -name '*.java' -print -exec sed -i '/^```/d' {} \;
+
       - name: Ensure Maven test folder exists
         run: mkdir -p src/test/java
 
