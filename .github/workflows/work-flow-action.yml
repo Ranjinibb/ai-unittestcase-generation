@@ -19,11 +19,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Create Maven folder to satisfy cache
+        run: mkdir -p ~/.m2/repository
+
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
           cache: maven
 
       - name: Configure AWS credentials (OIDC)
@@ -31,7 +34,6 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::595868460191:role/bedrock_aws
           aws-region: us-east-1
-      # OIDC approach (no long-lived keys) is the recommended pattern. [1](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws)
 
       - name: Compute changed Java files
         id: changed
@@ -40,13 +42,20 @@ jobs:
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep '^src/main/java/.*\.java$' || true)
+
           {
             echo "changed<<EOF"
             echo "$CHANGED"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+
           printf "%s\n" "$CHANGED" > changed_files.txt
-          echo "[DEBUG] Changed sources:"; cat changed_files.txt
+          echo "[DEBUG] Changed sources:"
+          cat changed_files.txt
+
+      - name: DEBUG when no changed files
+        if: steps.changed.outputs.changed == ''
+        run: echo "No src/main/java/*.java changes detected in this PR."
 
       - name: Prepare payload for Lambda
         if: steps.changed.outputs.changed != ''
@@ -54,82 +63,135 @@ jobs:
         run: |
           python3 - << 'PY'
           import json, pathlib, os
+
           changed = pathlib.Path("changed_files.txt").read_text().strip().splitlines()
-          files=[]
+          files = []
+
           for p in changed:
+            path = pathlib.Path(p)
             try:
-              files.append({"path": p, "content": pathlib.Path(p).read_text(encoding="utf-8")})
+              files.append({"path": p, "content": path.read_text(encoding="utf-8")})
             except Exception:
               pass
-          payload = {"repo": os.getenv("GITHUB_REPOSITORY"),
-                     "prNumber": int(os.getenv("PR_NUMBER") or 0),
-                     "files": files}
+
+          payload = {
+            "repo": os.getenv("GITHUB_REPOSITORY"),
+            "prNumber": int(os.getenv("PR_NUMBER") or 0),
+            "files": files,
+          }
+
           pathlib.Path("payload.json").write_text(json.dumps(payload))
           PY
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
 
       - name: Invoke Lambda (generate tests)
+        id: inv
         if: steps.changed.outputs.changed != ''
         shell: bash
         run: |
           set -e
-          # Call synchronously and capture response to out.json
+
           aws lambda invoke \
             --function-name ai-test-generator \
             --cli-binary-format raw-in-base64-out \
             --payload file://payload.json \
             out.json >/dev/null
-          cat out.json | jq -r '.zip_base64' > zip.b64
+
+          jq -r '.zip_base64' out.json > zip.b64
+
           if [ -s zip.b64 ] && [ "$(wc -c < zip.b64)" -gt 2 ]; then
             base64 -d zip.b64 > generated_tests.zip
-            echo "has_zip=yes" >> $GITHUB_OUTPUT
+            echo "has_zip=yes" >> "$GITHUB_OUTPUT"
           else
-            echo "has_zip=no" >> $GITHUB_OUTPUT
+            echo "has_zip=no" >> "$GITHUB_OUTPUT"
           fi
-      # Using aws lambda invoke is the standard & documented synchronous call. [3](https://docs.aws.amazon.com/cli/latest/reference/lambda/invoke.html)[10](https://bobbyhadz.com/blog/aws-cli-invoke-lambda-functions)
-        id: inv
 
       - name: Unpack tests (if any)
         if: steps.inv.outputs.has_zip == 'yes'
         shell: bash
         run: |
-          rm -rf gen_out && mkdir -p gen_out src/java/test
+          rm -rf gen_out && mkdir -p gen_out src/test/java
           unzip -o generated_tests.zip -d gen_out >/dev/null
-          # Copy everything under src/java/test from the zip into the workspace
-          if [ -d gen_out/src/java/test ]; then
-            rsync -a gen_out/src/java/test/ src/java/test/
+
+          if [ -d gen_out/src/test/java ]; then
+            rsync -a gen_out/src/test/java/ src/test/java/
           fi
-          echo "[DEBUG] src/java/test tree:"; ls -R src/java/test || true
+
+          echo "[DEBUG] src/test/java tree:"
+          ls -R src/test/java || true
 
       - name: Copy generated tests → Maven folder
         if: steps.inv.outputs.has_zip == 'yes'
         shell: bash
         run: |
           mkdir -p src/test/java
-          find src/java/test -type f -name '*.java' -print -exec bash -c '
-            rel="${1#src/java/test/}"
+          find src/test/java -type f -name '*.java' -print -exec bash -c '
+            rel="${1#src/test/java/}"
             dest="src/test/java/$rel"
             mkdir -p "$(dirname "$dest")"
             cp "$1" "$dest"
           ' _ {} \;
 
+      - name: Remove Markdown fences only
+        shell: bash
+        run: |
+          find src/test/java -type f -name '*.java' -print -exec sed -i '/^```/d' {} \;
+
+      - name: Ensure Maven test folder exists
+        run: mkdir -p src/test/java
+
+      - name: DEBUG - Show structure of src/test/java
+        run: |
+          echo "==== DEBUG src/test/java ===="
+          if [ -d src/test/java ]; then
+            find src/test/java -type f -print
+          else
+            echo "src/test/java DOES NOT EXIST"
+          fi
+
+      - name: DEBUG - Show structure of src/test/java
+        run: |
+          echo "==== DEBUG src/test/java ===="
+          if [ -d src/test/java ]; then
+            find src/test/java -type f -print
+          else
+            echo "src/test/java DOES NOT EXIST"
+          fi
+
+      - name: DEBUG - check untracked files under workspace
+        run: |
+          echo "==== DEBUG git ls-files -o --exclude-standard ===="
+          git ls-files -o --exclude-standard
+
+      # FIXED STEP — CORRECT TEST DETECTION
       - name: Detect generated tests
         id: tests
         shell: bash
         run: |
-          git add -N src/test/java || true
-          if git diff --name-only --exit-code src/test/java; then
+          NEW_TESTS=$(git ls-files -o --exclude-standard src/test/java)
+
+          if [ -n "$NEW_TESTS" ]; then
+            echo "has_tests=yes" >> "$GITHUB_OUTPUT"
+            echo "[DEBUG] New/updated tests:"
+            echo "$NEW_TESTS"
+          else
             echo "has_tests=no" >> "$GITHUB_OUTPUT"
             echo "[DEBUG] No new tests."
-          else
-            echo "has_tests=yes" >> "$GITHUB_OUTPUT"
-            echo "[DEBUG] New/updated tests:"; git diff --name-only src/test/java
           fi
 
       - name: Run unit tests
         if: steps.tests.outputs.has_tests == 'yes'
         run: mvn -B test
+
+      - name: Ensure Git working tree is clean
+        run: git add -A
+
+      - name: Stage all changes for PR
+        run: git add -A
+
+      - name: Stage all test changes
+        run: git add -A
 
       - name: Create Bot PR with generated tests
         if: steps.tests.outputs.has_tests == 'yes'
@@ -142,8 +204,11 @@ jobs:
             This PR adds **AI-generated unit tests** for Java files changed in PR #${{ github.event.pull_request.number }}.
             - Generated by AWS Lambda (Bedrock)
             - Validated with Maven
+          base: ${{ github.event.pull_request.base.ref }}
           branch: ai/tests/pr-${{ github.event.pull_request.number }}
+          branch-suffix: timestamp
           add-paths: |
+            src/test/java
             src/test/java/**
           delete-branch: true
 
