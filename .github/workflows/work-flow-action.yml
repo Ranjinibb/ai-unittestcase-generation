@@ -111,23 +111,23 @@ jobs:
         if: steps.inv.outputs.has_zip == 'yes'
         shell: bash
         run: |
-          rm -rf gen_out && mkdir -p gen_out src/java/test
+          rm -rf gen_out && mkdir -p gen_out src/test/java
           unzip -o generated_tests.zip -d gen_out >/dev/null
 
-          if [ -d gen_out/src/java/test ]; then
-            rsync -a gen_out/src/java/test/ src/java/test/
+          if [ -d gen_out/src/test/java ]; then
+            rsync -a gen_out/src/test/java/ src/test/java/
           fi
 
-          echo "[DEBUG] src/java/test tree:"
-          ls -R src/java/test || true
+          echo "[DEBUG] src/test/java tree:"
+          ls -R src/test/java || true
 
       - name: Copy generated tests → Maven folder
         if: steps.inv.outputs.has_zip == 'yes'
         shell: bash
         run: |
           mkdir -p src/test/java
-          find src/java/test -type f -name '*.java' -print -exec bash -c '
-            rel="${1#src/java/test/}"
+          find src/test/java -type f -name '*.java' -print -exec bash -c '
+            rel="${1#src/test/java/}"
             dest="src/test/java/$rel"
             mkdir -p "$(dirname "$dest")"
             cp "$1" "$dest"
@@ -135,6 +135,29 @@ jobs:
 
       - name: Ensure Maven test folder exists
         run: mkdir -p src/test/java
+
+      - name: DEBUG - Show structure of src/test/java
+        run: |
+          echo "==== DEBUG src/test/java ===="
+          if [ -d src/test/java ]; then
+            find src/test/java -type f -print
+          else
+            echo "src/test/java DOES NOT EXIST"
+          fi
+
+      - name: DEBUG - Show structure of src/test/java
+        run: |
+          echo "==== DEBUG src/test/java ===="
+          if [ -d src/test/java ]; then
+            find src/test/java -type f -print
+          else
+            echo "src/test/java DOES NOT EXIST"
+          fi
+
+      - name: DEBUG - check untracked files under workspace
+        run: |
+          echo "==== DEBUG git ls-files -o --exclude-standard ===="
+          git ls-files -o --exclude-standard
 
       # FIXED STEP — CORRECT TEST DETECTION
       - name: Detect generated tests
