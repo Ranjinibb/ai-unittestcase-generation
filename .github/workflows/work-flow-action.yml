@@ -117,6 +117,9 @@ jobs:
             cp "$1" "$dest"
           ' _ {} \;
 
+      - name: Ensure Maven test folder exists
+        run: mkdir -p src/test/java
+
       - name: Detect generated tests
         id: tests
         shell: bash
