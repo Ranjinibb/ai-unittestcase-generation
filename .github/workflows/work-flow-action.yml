@@ -50,7 +50,13 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           printf "%s\n" "$CHANGED" > changed_files.txt
           echo "[DEBUG] Changed sources:"; cat changed_files.txt
+      
 
+      - name: DEBUG changed files
+        if: steps.changed.outputs.changed == ''
+        run: |
+          echo "No src/main/java/*.java changes detected in this PR."
+      
       - name: Prepare payload for Lambda
         if: steps.changed.outputs.changed != ''
         shell: bash
