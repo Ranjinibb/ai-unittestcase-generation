@@ -19,6 +19,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Create Maven folder to satisfy cache
+        run: mkdir -p ~/.m2/repository
+
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
