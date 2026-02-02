@@ -169,12 +169,14 @@ jobs:
         id: tests
         shell: bash
         run: |
-          NEW_TESTS=$(git ls-files -o --exclude-standard src/test/java)
+          git add -A  # Stage changes so diff-index works but DO NOT COMMIT
 
-          if [ -n "$NEW_TESTS" ]; then
+          NEW_OR_MODIFIED=$(git diff --cached --name-only --diff-filter=AM src/test/java)
+
+          if [ -n "$NEW_OR_MODIFIED" ]; then
             echo "has_tests=yes" >> "$GITHUB_OUTPUT"
             echo "[DEBUG] New/updated tests:"
-            echo "$NEW_TESTS"
+            echo "$NEW_OR_MODIFIED"
           else
             echo "has_tests=no" >> "$GITHUB_OUTPUT"
             echo "[DEBUG] No new tests."
@@ -183,12 +185,6 @@ jobs:
       - name: Run unit tests
         if: steps.tests.outputs.has_tests == 'yes'
         run: mvn -B test
-
-      - name: Ensure Git working tree is clean
-        run: git add -A
-
-      - name: Stage all changes for PR
-        run: git add -A
 
       - name: Stage all test changes
         run: git add -A
