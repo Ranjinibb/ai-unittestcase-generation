@@ -26,7 +26,7 @@ public class HelloWorldController {
         return "Hello, World!";
     }
 
-    @GetMapping("/hello4")
+    @GetMapping("/hello5")
     public String sendGreetings4() {
         return "Hello, World!";
     }
