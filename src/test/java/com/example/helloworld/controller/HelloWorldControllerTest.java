@@ -1,36 +1,61 @@
 // src/test/java/com/example/helloworld/controller/HelloWorldControllerTest.java
+
 package com.example.helloworld.controller;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.junit.jupiter.SpringExtension;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.test.web.servlet.MockMvc;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
-class HelloWorldControllerTest {
+@WebMvcTest(HelloWorldController.class)
+public class HelloWorldControllerTest {
 
     @Autowired
-    private HelloWorldController helloWorldController;
+    private MockMvc mockMvc;
 
     @Test
-    void testSendGreetings() {
-        assertThat(helloWorldController.sendGreetings()).isEqualTo("Hello, World!");
+    public void testSendGreetings() throws Exception {
+        mockMvc.perform(get("/hello"))
+               .andExpect(status().isOk())
+                .andExpect(content().string("Hello, World!"));
     }
 
     @Test
-    void testSendGreetings1() {
-        assertThat(helloWorldController.sendGreetings1()).isEqualTo("Hello, World!");
+    public void testSendGreetings1() throws Exception {
+        mockMvc.perform(get("/hello1"))
+               .andExpect(status().isOk())
+               .andExpect(content().string("Hello, World!"));
     }
 
     @Test
-    void testSendGreetings2() {
-        assertThat(helloWorldController.sendGreetings2()).isEqualTo("Hello, World!");
+    public void testSendGreetings2() throws Exception {
+        mockMvc.perform(get("/hello2"))
+                .andExpect(status().isOk())
+               .andExpect(content().string("Hello, World!"));
     }
 
     @Test
-    void testSendGreetings3() {
-        assertThat(helloWorldController.sendGreetings3()).isEqualTo("Hello, World!");
+    public void testSendGreetings3() throws Exception {
+        mockMvc.perform(get("/hello3"))
+                .andExpect(status().isOk())
+               .andExpect(content().string("Hello, World!"));
+    }
+
+    @Test
+    public void testSendGreetings4() throws Exception {
+        mockMvc.perform(get("/hello4"))
+               .andExpect(status().isOk())
+               .andExpect(content().string("Hello, World!"));
+    }
+
+    @Test
+    public void testSendGreetings5() throws Exception {
+        mockMvc.perform(get("/hello5"))
+                .andExpect(status().isOk())
+               .andExpect(content().string("Hello, World!"));
     }
 }
