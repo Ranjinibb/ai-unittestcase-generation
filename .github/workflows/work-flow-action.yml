@@ -133,32 +133,33 @@ jobs:
             cp "$1" "$dest"
           ' _ {} \;
 
-      - name: Sanitize generated test imports (fix wrong AutoConfigureMockMvc)
+      - name: Sanitize generated test imports and annotations
         if: steps.inv.outputs.has_zip == 'yes'
         shell: bash
         run: |
-          set -euo pipefail
+          echo "[SANITIZE] Fixing incorrect imports and test styles..."
       
-          # If there's no test directory yet, nothing to sanitize
-          if [ ! -d "src/test/java" ]; then
-            echo "[SANITIZE] No src/test/java directory. Skipping."
-            exit 0
-          fi
+          # Fix AutoConfigureMockMvc incorrect package
+          find src/test/java -type f -name '*.java' -print0 \
+            | xargs -0 sed -i \
+              's#org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc#org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc#g'
       
-          # Find files that contain the wrong import; do not fail when no matches
-          MATCHES="$(grep -RIl --include='*.java' 'org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc' src/test/java || true)"
+          # Replace WebTestClient with MockMvc
+          find src/test/java -type f -name '*.java' -print0 \
+            | xargs -0 sed -i \
+              's#org.springframework.test.web.reactive.server.WebTestClient#org.springframework.test.web.servlet.MockMvc#g'
       
-          if [ -z "$MATCHES" ]; then
-            echo "[SANITIZE] No files with wrong AutoConfigureMockMvc import found. Nothing to change."
-            exit 0
-          fi
+          # Replace @Autowired WebTestClient → @Autowired MockMvc
+          find src/test/java -type f -name '*.java' -print0 \
+            | xargs -0 sed -i \
+              's#WebTestClient#MockMvc#g'
       
-          echo "[SANITIZE] Fixing wrong AutoConfigureMockMvc import in:"
-          echo "$MATCHES"
+          # Insert required Spring Boot test annotations
+          find src/test/java -type f -name '*.java' -exec grep -q "@SpringBootTest" {} \; -print0 \
+            | xargs -0 -I{} sed -i '1i import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;' {}
       
-          # Replace wrong import with the correct one
-          echo "$MATCHES" | xargs -r sed -i \
-            's#org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc#org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc#g'
+          find src/test/java -type f -name '*.java' -exec grep -q "@SpringBootTest" {} \; -print0 \
+            | xargs -0 -I{} sed -i '/@SpringBootTest/a @AutoConfigureMockMvc' {}
       
           echo "[SANITIZE] Completed."
 
