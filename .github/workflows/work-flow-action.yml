@@ -133,6 +133,20 @@ jobs:
             cp "$1" "$dest"
           ' _ {} \;
 
+      - name: Sanitize generated tests imports
+        if: steps.inv.outputs.has_zip == 'yes'
+        shell: bash
+        run: |
+          # Fix wrong AutoConfigureMockMvc import
+          grep -RIl "org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc" src/test/java \
+            | xargs -r sed -i 's#org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc#org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc#g'
+      
+          # If tests use WebMvc slice, they shouldn't also use @SpringBootTest (optional heuristic)
+          # You can keep this commented unless needed:
+          # for f in $(grep -RIl "@WebMvcTest" src/test/java); do
+          #   sed -i '/@SpringBootTest/d' "$f"
+          # done
+
       - name: Remove Markdown fences only
         shell: bash
         run: |
