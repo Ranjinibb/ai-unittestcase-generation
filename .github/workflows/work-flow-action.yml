@@ -169,12 +169,14 @@ jobs:
         id: tests
         shell: bash
         run: |
-          NEW_TESTS=$(git ls-files -o --exclude-standard src/test/java)
+          git add -A  # Stage changes so diff-index works but DO NOT COMMIT
 
-          if [ -n "$NEW_TESTS" ]; then
+          NEW_OR_MODIFIED=$(git diff --cached --name-only --diff-filter=AM src/test/java)
+
+          if [ -n "$NEW_OR_MODIFIED" ]; then
             echo "has_tests=yes" >> "$GITHUB_OUTPUT"
             echo "[DEBUG] New/updated tests:"
-            echo "$NEW_TESTS"
+            echo "$NEW_OR_MODIFIED"
           else
             echo "has_tests=no" >> "$GITHUB_OUTPUT"
             echo "[DEBUG] No new tests."
@@ -184,11 +186,62 @@ jobs:
         if: steps.tests.outputs.has_tests == 'yes'
         run: mvn -B test
 
-      - name: Ensure Git working tree is clean
-        run: git add -A
+      - name: Show Java & Maven environment
+        if: always()
+        run: |
+          echo "===== JAVA & MAVEN ====="
+          java -version
+          mvn -version
+          locale || true
+          date -Iseconds
+          uname -a
 
-      - name: Stage all changes for PR
-        run: git add -A
+      - name: Dump surefire reports to logs
+        if: always()
+        run: |
+          echo "===== SUREFIRE REPORTS (TXT first 200 lines) ====="
+          if [ -d target/surefire-reports ]; then
+            find target/surefire-reports -maxdepth 1 -type f -name '*.txt' -print -exec sed -n '1,200p' {} \;
+            echo "===== FAILURES/ERRORS GREP ====="
+            grep -RIn "<<< FAILURE!" target/surefire-reports || true
+            grep -RIn "<<< ERROR!" target/surefire-reports || true
+          else
+            echo "No surefire-reports directory found."
+          fi
+
+      - name: Upload surefire-reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # Make it unique for each job and rerun attempt
+          name: surefire-reports-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: target/surefire-reports
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Dump surefire summary to logs
+        if: always()
+        run: |
+          echo "==== SUREFIRE TXT REPORTS ===="
+          if [ -d target/surefire-reports ]; then
+            # Print brief summaries first
+            find target/surefire-reports -type f -name '*.txt' -maxdepth 1 -print -exec sed -n '1,200p' {} \;
+            echo "==== FAILED TEST OUTPUTS (if any) ===="
+            # Often helpful: show first failing stack traces from .txt files
+            grep -RIn "<<< FAILURE!" target/surefire-reports || true
+            grep -RIn "<<< ERROR!" target/surefire-reports || true
+          else
+            echo "No surefire-reports directory found."
+          fi
+
+      - name: Upload surefire-reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-${{ github.run_id }}
+          path: target/surefire-reports
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Stage all test changes
         run: git add -A
