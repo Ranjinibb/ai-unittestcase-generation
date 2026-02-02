@@ -36,4 +36,9 @@ public class HelloWorldController {
         return "Hello, World!";
     }
 
+    @GetMapping("/hello6")
+    public String sendGreetings6() {
+        return "Hello, World!";
+    }
+
 }
