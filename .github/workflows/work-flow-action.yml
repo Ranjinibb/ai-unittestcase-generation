@@ -213,7 +213,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: surefire-reports-${{ github.run_id }}
+          # Make it unique for each job and rerun attempt
+          name: surefire-reports-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
           path: target/surefire-reports
           if-no-files-found: warn
           retention-days: 7
