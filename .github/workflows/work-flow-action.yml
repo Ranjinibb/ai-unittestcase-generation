@@ -133,19 +133,34 @@ jobs:
             cp "$1" "$dest"
           ' _ {} \;
 
-      - name: Sanitize generated tests imports
+      - name: Sanitize generated test imports (fix wrong AutoConfigureMockMvc)
         if: steps.inv.outputs.has_zip == 'yes'
         shell: bash
         run: |
-          # Fix wrong AutoConfigureMockMvc import
-          grep -RIl "org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc" src/test/java \
-            | xargs -r sed -i 's#org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc#org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc#g'
+          set -euo pipefail
       
-          # If tests use WebMvc slice, they shouldn't also use @SpringBootTest (optional heuristic)
-          # You can keep this commented unless needed:
-          # for f in $(grep -RIl "@WebMvcTest" src/test/java); do
-          #   sed -i '/@SpringBootTest/d' "$f"
-          # done
+          # If there's no test directory yet, nothing to sanitize
+          if [ ! -d "src/test/java" ]; then
+            echo "[SANITIZE] No src/test/java directory. Skipping."
+            exit 0
+          fi
+      
+          # Find files that contain the wrong import; do not fail when no matches
+          MATCHES="$(grep -RIl --include='*.java' 'org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc' src/test/java || true)"
+      
+          if [ -z "$MATCHES" ]; then
+            echo "[SANITIZE] No files with wrong AutoConfigureMockMvc import found. Nothing to change."
+            exit 0
+          fi
+      
+          echo "[SANITIZE] Fixing wrong AutoConfigureMockMvc import in:"
+          echo "$MATCHES"
+      
+          # Replace wrong import with the correct one
+          echo "$MATCHES" | xargs -r sed -i \
+            's#org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc#org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc#g'
+      
+          echo "[SANITIZE] Completed."
 
       - name: Remove Markdown fences only
         shell: bash
