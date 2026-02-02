@@ -20,4 +20,9 @@ public class HelloWorldController {
     public String sendGreetings2() {
         return "Hello, World!";
     }
+
+    @GetMapping("/hello3")
+    public String sendGreetings3() {
+        return "Hello, World!";
+    }
 }
