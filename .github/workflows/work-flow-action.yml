@@ -133,35 +133,26 @@ jobs:
             cp "$1" "$dest"
           ' _ {} \;
 
-      - name: Sanitize generated test imports and annotations
+      - name: Sanitize generated test imports (safe)
         if: steps.inv.outputs.has_zip == 'yes'
         shell: bash
         run: |
-          echo "[SANITIZE] Fixing incorrect imports and test styles..."
+          for f in $(find src/test/java -name '*.java'); do
       
-          # Fix AutoConfigureMockMvc incorrect package
-          find src/test/java -type f -name '*.java' -print0 \
-            | xargs -0 sed -i \
-              's#org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc#org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc#g'
+            # fix wrong import
+            sed -i 's#org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc#org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc#g' "$f"
       
-          # Replace WebTestClient with MockMvc
-          find src/test/java -type f -name '*.java' -print0 \
-            | xargs -0 sed -i \
-              's#org.springframework.test.web.reactive.server.WebTestClient#org.springframework.test.web.servlet.MockMvc#g'
+            # ensure correct import appears AFTER package
+            if ! grep -q "AutoConfigureMockMvc" "$f"; then
+              sed -i '/^package /a import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;' "$f"
+            fi
       
-          # Replace @Autowired WebTestClient → @Autowired MockMvc
-          find src/test/java -type f -name '*.java' -print0 \
-            | xargs -0 sed -i \
-              's#WebTestClient#MockMvc#g'
+            # remove stray braces (safety)
+            sed -i '/^}$/d' "$f"
       
-          # Insert required Spring Boot test annotations
-          find src/test/java -type f -name '*.java' -exec grep -q "@SpringBootTest" {} \; -print0 \
-            | xargs -0 -I{} sed -i '1i import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;' {}
-      
-          find src/test/java -type f -name '*.java' -exec grep -q "@SpringBootTest" {} \; -print0 \
-            | xargs -0 -I{} sed -i '/@SpringBootTest/a @AutoConfigureMockMvc' {}
-      
-          echo "[SANITIZE] Completed."
+            # ensure class starts correctly
+            head -n 5 "$f" | grep -q "class" || echo "[WARN] $f might still be malformed"
+          done
 
       - name: Remove Markdown fences only
         shell: bash
@@ -211,6 +202,12 @@ jobs:
             echo "has_tests=no" >> "$GITHUB_OUTPUT"
             echo "[DEBUG] No new tests."
           fi
+
+      - name: DEBUG – print failing test file
+        shell: bash
+        run: |
+          echo "===== HelloWorldControllerTest.java ====="
+          sed -n '1,200p' src/test/java/com/example/helloworld/controller/HelloWorldControllerTest.java
 
       - name: Run unit tests
         if: steps.tests.outputs.has_tests == 'yes'
