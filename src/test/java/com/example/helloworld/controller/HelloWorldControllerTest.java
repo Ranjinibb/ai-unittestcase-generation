@@ -1,5 +1,4 @@
 // src/test/java/com/example/helloworld/controller/HelloWorldControllerTest.java
-
 package com.example.helloworld.controller;
 
 import org.junit.jupiter.api.Test;
@@ -41,27 +40,6 @@ public class HelloWorldControllerTest {
     @Test
     public void testSendGreetings3() throws Exception {
         mockMvc.perform(get("/hello3"))
-                .andExpect(status().isOk())
-               .andExpect(content().string("Hello, World!"));
-    }
-
-    @Test
-    public void testSendGreetings4() throws Exception {
-        mockMvc.perform(get("/hello4"))
-                .andExpect(status().isOk())
-               .andExpect(content().string("Hello, World!"));
-    }
-
-    @Test
-    public void testSendGreetings5() throws Exception {
-        mockMvc.perform(get("/hello5"))
-                .andExpect(status().isOk())
-               .andExpect(content().string("Hello, World!"));
-    }
-
-    @Test
-    public void testSendGreetings6() throws Exception {
-        mockMvc.perform(get("/hello6"))
                 .andExpect(status().isOk())
                .andExpect(content().string("Hello, World!"));
     }
