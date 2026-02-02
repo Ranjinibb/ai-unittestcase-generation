@@ -133,26 +133,56 @@ jobs:
             cp "$1" "$dest"
           ' _ {} \;
 
-      - name: Sanitize generated test imports (safe)
+      - name: Sanitize generated tests (MVC vs WebFlux, imports, braces)
         if: steps.inv.outputs.has_zip == 'yes'
         shell: bash
         run: |
-          for f in $(find src/test/java -name '*.java'); do
+          set -euo pipefail
+          if [ ! -d "src/test/java" ]; then
+            echo "[SANITIZE] No tests to sanitize."
+            exit 0
+          fi
       
-            # fix wrong import
-            sed -i 's#org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc#org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc#g' "$f"
+          echo "[SANITIZE] Rewriting WebTestClient -> MockMvc (if any) and fixing imports/annotations..."
       
-            # ensure correct import appears AFTER package
-            if ! grep -q "AutoConfigureMockMvc" "$f"; then
-              sed -i '/^package /a import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;' "$f"
+          # 1) Replace WebTestClient with MockMvc (class names and imports)
+          find src/test/java -type f -name '*.java' -print0 \
+            | xargs -0 sed -i \
+              -e 's#org.springframework.test.web.reactive.server.WebTestClient#org.springframework.test.web.servlet.MockMvc#g' \
+              -e 's#WebTestClient#MockMvc#g'
+      
+          # 2) Fix wrong AutoConfigureMockMvc import (generator sometimes uses mock.mockito)
+          find src/test/java -type f -name '*.java' -print0 \
+            | xargs -0 sed -i \
+              -e 's#org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc#org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc#g'
+      
+          # 3) If a test uses @WebMvcTest, drop any @SpringBootTest on the same class (they should not be mixed)
+          for f in $(find src/test/java -type f -name '*.java'); do
+            if grep -q "@WebMvcTest" "$f"; then
+              sed -i '/@SpringBootTest/d' "$f"
+              # Ensure we have the proper MockMvc import when using WebMvcTest
+              if ! grep -q "org.springframework.test.web.servlet.MockMvc" "$f"; then
+                sed -i '/^package /a import org.springframework.test.web.servlet.MockMvc;' "$f"
+              fi
             fi
-      
-            # remove stray braces (safety)
-            sed -i '/^}$/d' "$f"
-      
-            # ensure class starts correctly
-            head -n 5 "$f" | grep -q "class" || echo "[WARN] $f might still be malformed"
           done
+      
+          # 4) Ensure imports appear AFTER the package line (avoid invalid top-of-file insertions)
+          # (No-op here since we use '/^package /a' above; included as a reminder)
+      
+          # 5) Fix missing closing braces — prevents "reached end of file while parsing"
+          for f in $(find src/test/java -type f -name '*.java'); do
+            OPEN=$(grep -o '{' "$f" | wc -l || echo 0)
+            CLOSE=$(grep -o '}' "$f" | wc -l || echo 0)
+            if [ "$OPEN" -gt "$CLOSE" ]; then
+              MISSING=$((OPEN - CLOSE))
+              printf '%*s' "$MISSING" | tr ' ' '}' >> "$f"
+              echo "[SANITIZE] Fixed $MISSING missing brace(s) in $f"
+            fi
+          done
+      
+          echo "[SANITIZE] Completed."
+  
 
       - name: Fix missing closing braces in generated tests
         if: steps.inv.outputs.has_zip == 'yes'
