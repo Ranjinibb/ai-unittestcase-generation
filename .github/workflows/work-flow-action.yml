@@ -154,6 +154,23 @@ jobs:
             head -n 5 "$f" | grep -q "class" || echo "[WARN] $f might still be malformed"
           done
 
+      - name: Fix missing closing braces in generated tests
+        if: steps.inv.outputs.has_zip == 'yes'
+        shell: bash
+        run: |
+          for f in $(find src/test/java -name '*.java'); do
+            echo "[BRACE-FIX] Checking $f"
+      
+            OPEN=$(grep -o '{' "$f" | wc -l)
+            CLOSE=$(grep -o '}' "$f" | wc -l)
+      
+            if [ "$OPEN" -gt "$CLOSE" ]; then
+              MISSING=$((OPEN - CLOSE))
+              echo "[BRACE-FIX] File $f is missing $MISSING closing brace(s). Fixing..."
+              printf '%*s' "$MISSING" | tr ' ' '}' >> "$f"
+            fi
+          done
+
       - name: Remove Markdown fences only
         shell: bash
         run: |
