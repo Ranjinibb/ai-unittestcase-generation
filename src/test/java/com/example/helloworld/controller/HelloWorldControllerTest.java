@@ -1,39 +1,49 @@
 // src/test/java/com/example/helloworld/controller/HelloWorldControllerTest.java
 package com.example.helloworld.controller;
+import org.springframework.test.web.servlet.MockMvc;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.http.ResponseEntity;
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.assertj.core.api.Assertions.assertThat;
 
-@WebMvcTest(HelloWorldController.class)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 public class HelloWorldControllerTest {
 
     @Autowired
-    private MockMvc mockMvc;
+    private TestRestTemplate restTemplate;
 
     @Test
-    public void testSendGreetings() throws Exception {
-        mockMvc.perform(get("/hello"))
-               .andExpect(status().isOk())
-                .andExpect(content().string("Hello, World!"));
+    public void testSendGreetings() {
+        ResponseEntity<String> response = restTemplate.getForEntity("/hello", String.class);
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(response.getBody()).isEqualTo("Hello, World!");
     }
 
     @Test
-    public void testSendGreetings1() throws Exception {
-        mockMvc.perform(get("/hello1"))
-               .andExpect(status().isOk())
-               .andExpect(content().string("Hello, World!"));
+    public void testSendGreetings1() {
+        ResponseEntity<String> response = restTemplate.getForEntity("/hello1", String.class);
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(response.getBody()).isEqualTo("Hello, World!");
     }
 
     @Test
-    public void testSendGreetings2() throws Exception {
-        mockMvc.perform(get("/hello2"))
-               .andExpect(status().isOk())
-               .andExpect(content().string("Hello, World!"));
+    public void testSendGreetings2() {
+        ResponseEntity<String> response = restTemplate.getForEntity("/hello2", String.class);
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(response.getBody()).isEqualTo("Hello, World!");
+    }
+
+    @Test
+    public void testSendGreetings3() {
+        ResponseEntity<String> response = restTemplate.getForEntity("/hello3", String.class);
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(response.getBody()).isEqualTo("Hello, World!");
     }
 }
