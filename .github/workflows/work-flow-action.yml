@@ -90,7 +90,7 @@ jobs:
         if: steps.changed.outputs.changed != ''
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           aws lambda invoke \
             --function-name ai-test-generator \
@@ -98,14 +98,89 @@ jobs:
             --payload file://payload.json \
             out.json >/dev/null
 
-          jq -r '.zip_base64' out.json > zip.b64
+          echo "==== DEBUG out.json (first 200 chars) ===="
+          head -c 200 out.json || true
+          echo
+          echo "=========================================="
 
-          if [ -s zip.b64 ] && [ "$(wc -c < zip.b64)" -gt 2 ]; then
-            base64 -d zip.b64 > generated_tests.zip
+          # Try to extract base64 from several possible shapes of the response
+          ZIP_B64=$(
+            jq -r '
+              # direct
+              .zip_base64 // 
+              # nested object
+              .body.zip_base64 // 
+              # stringified JSON in body
+              (try (.body | fromjson | .zip_base64) catch empty) //
+              empty
+            ' out.json
+          )
+
+          if [ -z "${ZIP_B64:-}" ] || [ "$ZIP_B64" = "null" ]; then
+            echo "[WARN] No zip_base64 found in Lambda response."
+            echo "has_zip=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Decode base64 → binary
+          printf "%s" "$ZIP_B64" | base64 -d > generated_tests.bin 2>/dev/null || {
+            echo "[WARN] base64 decode failed."
+            echo "has_zip=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          # Check magic bytes
+          MAGIC=$(head -c 4 generated_tests.bin | hexdump -v -e '/1 "%02X"')
+          echo "[DEBUG] Magic bytes: $MAGIC"
+
+          if [ "$MAGIC" = "504B0304" ]; then
+            mv generated_tests.bin generated_tests.zip
+            echo "archive_type=zip" >> "$GITHUB_OUTPUT"
             echo "has_zip=yes" >> "$GITHUB_OUTPUT"
+            echo "[INFO] Valid ZIP detected."
+          elif [ "${MAGIC:0:4}" = "1F8B" ]; then
+            mv generated_tests.bin generated_tests.tar.gz
+            echo "archive_type=tgz" >> "$GITHUB_OUTPUT"
+            echo "has_zip=yes" >> "$GITHUB_OUTPUT"
+            echo "[INFO] GZIP archive detected (tar.gz)."
           else
+            echo "[WARN] Unknown archive format (magic=$MAGIC)."
             echo "has_zip=no" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Pretty print Lambda response
+        if: steps.changed.outputs.changed != ''
+        run: |
+          echo "==== Lambda response (jq pretty) ===="
+          jq . out.json || cat out.json
+
+      - name: Unpack tests (if any)
+        if: steps.inv.outputs.has_zip == 'yes'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf gen_out && mkdir -p gen_out src/test/java
+
+          case "${{ steps.inv.outputs.archive_type }}" in
+            zip)
+              unzip -o generated_tests.zip -d gen_out >/dev/null
+              ;;
+            tgz)
+              tar -xzf generated_tests.tar.gz -C gen_out
+              ;;
+            *)
+              echo "[WARN] Unknown archive_type; skipping."
+              exit 0
+              ;;
+          esac
+
+          # Copy tests if present
+          if [ -d gen_out/src/test/java ]; then
+            rsync -a gen_out/src/test/java/ src/test/java/
+          fi
+
+          echo "[DEBUG] src/test/java tree:"
+          ls -R src/test/java || true
 
       - name: Unpack tests (if any)
         if: steps.inv.outputs.has_zip == 'yes'
