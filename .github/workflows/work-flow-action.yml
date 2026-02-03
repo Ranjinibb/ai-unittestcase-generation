@@ -15,10 +15,12 @@ jobs:
 
     steps:
 
-      # -----------------
-      # Checkout + Java
-      # -----------------
+      # ----------------------------------------------------
+      # 1. CHECKOUT & JAVA
+      # ----------------------------------------------------
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for clean diffs
 
       - uses: actions/setup-java@v4
         with:
@@ -26,52 +28,55 @@ jobs:
           java-version: "21"
           cache: maven
 
-      # -----------------
-      # AWS Credentials
-      # -----------------
+      # ----------------------------------------------------
+      # 2. AWS CREDENTIALS
+      # ----------------------------------------------------
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::595868460191:role/bedrock_aws
           aws-region: us-east-1
 
-      # -----------------
-      # Detect changed Java files
-      # -----------------
-      - id: changed
+      # ----------------------------------------------------
+      # 3. DETECT CHANGED JAVA FILES (NO git fetch)
+      # ----------------------------------------------------
+      - name: Compute changed Java files
+        id: changed
         run: |
-          git fetch --depth=0
-          git diff --name-only \
-            ${{ github.event.pull_request.base.sha }} \
-            ${{ github.event.pull_request.head.sha }} \
+          BASE=${{ github.event.pull_request.base.sha }}
+          HEAD=${{ github.event.pull_request.head.sha }}
+
+          git diff --name-only "$BASE" "$HEAD" \
             | grep '^src/main/java/.*\.java$' || true > changed_files.txt
 
-          if [ ! -s changed_files.txt ]; then
-            echo "changed=" >> $GITHUB_OUTPUT
+          if [ -s changed_files.txt ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            cat changed_files.txt
           else
-            echo "changed=$(cat changed_files.txt)" >> $GITHUB_OUTPUT
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No Java source changes."
           fi
 
-      # -----------------
-      # Prepare payload
-      # -----------------
+      # ----------------------------------------------------
+      # 4. BUILD PAYLOAD FOR LAMBDA
+      # ----------------------------------------------------
       - name: Prepare Lambda Payload
-        if: steps.changed.outputs.changed != ''
+        if: steps.changed.outputs.changed == 'true'
         run: |
           python3 <<'EOF'
           import json, pathlib
           files=[]
           for p in pathlib.Path("changed_files.txt").read_text().splitlines():
-              content=pathlib.Path(p).read_text()
-              files.append({"path":p,"content":content})
-          payload={"files":files}
-          pathlib.Path("payload.json").write_text(json.dumps(payload))
+              content = pathlib.Path(p).read_text()
+              files.append({"path": p, "content": content})
+          pathlib.Path("payload.json").write_text(json.dumps({"files": files}))
           EOF
 
-      # -----------------
-      # Call Lambda
-      # -----------------
-      - id: lambda
-        if: steps.changed.outputs.changed != ''
+      # ----------------------------------------------------
+      # 5. INVOKE LAMBDA
+      # ----------------------------------------------------
+      - name: Invoke Lambda (generate tests)
+        id: lambda
+        if: steps.changed.outputs.changed == 'true'
         run: |
           aws lambda invoke \
             --function-name ai-test-generator \
@@ -79,87 +84,85 @@ jobs:
             --payload file://payload.json \
             response.json > /dev/null
 
-          ZIP_B64=$(jq -r '.zip_base64 // .body.zip_base64 // (try (.body|fromjson|.zip_base64) catch empty)' response.json)
-
-          if [ -z "$ZIP_B64" ] || [ "$ZIP_B64" = "null" ]; then
-            echo "has_zip=no" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          printf "%s" "$ZIP_B64" | base64 -d > tests.bin
-          MAGIC=$(head -c 4 tests.bin | hexdump -v -e '/1 "%02X"')
-
-          if [ "$MAGIC" = "504B0304" ]; then
-            mv tests.bin tests.zip
-            echo "archive=zip" >> $GITHUB_OUTPUT
+          ZIP_B64=$(jq -r '.zip_base64' response.json)
+          if [ -n "$ZIP_B64" ] && [ "$ZIP_B64" != "null" ]; then
+            echo "$ZIP_B64" | base64 -d > tests.zip
             echo "has_zip=yes" >> $GITHUB_OUTPUT
           else
             echo "has_zip=no" >> $GITHUB_OUTPUT
           fi
 
-      # -----------------
-      # Unzip into test folder
-      # -----------------
+      # ----------------------------------------------------
+      # 6. UNZIP INTO src/test/java
+      # ----------------------------------------------------
       - name: Extract tests
         if: steps.lambda.outputs.has_zip == 'yes'
         run: |
           rm -rf src/test/java
-          mkdir -p src/test/java
           unzip -o tests.zip -d . >/dev/null
 
-      # -----------------
-      # Detect new tests
-      # -----------------
-      - id: tests
+      # ----------------------------------------------------
+      # 7. DETECT IF ANY TEST FILES WERE GENERATED
+      # ----------------------------------------------------
+      - name: Detect generated tests
+        id: tests
         run: |
-          git add src/test/java
-          if git diff --cached --name-only --diff-filter=AM src/test/java | grep .; then
-            echo "has_tests=yes" >> $GITHUB_OUTPUT
+          if [ -d src/test/java ]; then
+            git add src/test/java
+            if git diff --cached --name-only --diff-filter=AM src/test/java | grep .; then
+              echo "has_tests=yes" >> $GITHUB_OUTPUT
+            else
+              echo "has_tests=no" >> $GITHUB_OUTPUT
+            fi
           else
             echo "has_tests=no" >> $GITHUB_OUTPUT
           fi
 
-      # -----------------
-      # Run tests
-      # -----------------
-      - if: steps.tests.outputs.has_tests == 'yes'
+      # ----------------------------------------------------
+      # 8. RUN UNIT TESTS
+      # ----------------------------------------------------
+      - name: Run unit tests
+        if: steps.tests.outputs.has_tests == 'yes'
         run: mvn -B test
 
-      # -----------------
-      # Upload surefire
-      # -----------------
-      - if: always()
-        uses: actions/upload-artifact@v4
+      # ----------------------------------------------------
+      # 9. UPLOAD SUREFIRE REPORTS
+      # ----------------------------------------------------
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: surefire-${{ github.run_id }}-${{ github.run_attempt }}
           path: target/surefire-reports
           if-no-files-found: warn
 
-      # -----------------
-      # Create PR with new tests
-      # -----------------
+      # ----------------------------------------------------
+      # 10. CREATE BOT PR FOR THE TESTS
+      # ----------------------------------------------------
       - name: Commit test changes
         if: steps.tests.outputs.has_tests == 'yes'
         run: git add src/test/java
 
-      - name: Create PR
+      - name: Create Bot PR
         if: steps.tests.outputs.has_tests == 'yes'
         uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "test(ai): add generated tests"
-          title: "AI: Generated unit tests"
-          branch: ai/tests/pr-${{ github.event.pull_request.number }}
+          title: "AI: Generated tests for PR #${{ github.event.pull_request.number }}"
           base: ${{ github.event.pull_request.base.ref }}
+          branch: ai/tests/pr-${{ github.event.pull_request.number }}
           add-paths: src/test/java/**
 
-      - name: Comment No Tests
+      # ----------------------------------------------------
+      # 11. COMMENT BACK ON ORIGINAL PR
+      # ----------------------------------------------------
+      - name: Comment - No tests generated
         if: steps.tests.outputs.has_tests != 'yes'
         uses: actions/github-script@v7
         with:
           script: |
             github.rest.issues.createComment({
+              issue_number: context.payload.pull_request.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
               body: "ℹ️ No AI tests generated for this PR."
             })
