@@ -352,6 +352,25 @@ jobs:
           echo "===== HelloWorldControllerTest.java ====="
           sed -n '1,200p' src/test/java/com/example/helloworld/controller/HelloWorldControllerTest.java
 
+      - name: Sanitize: Convert bad mockMvc.get() patterns to mockMvc.perform(get())
+        if: steps.inv.outputs.has_zip == 'yes'
+        shell: bash
+        run: |
+          echo "[SANITIZE] Converting WebTestClient-style calls into MockMvc calls..."
+      
+          # Fix patterns like mockMvc.get("/x")
+          find src/test/java -type f -name '*.java' -print0 \
+            | xargs -0 sed -E -i \
+              's/mockMvc\.get\(([^)]*)\)/mockMvc.perform(get(\1))/g'
+      
+          # Fix patterns like mockMvc.get().uri("/x")
+          find src/test/java -type f -name '*.java' -print0 \
+            | xargs -0 sed -E -i \
+              's/mockMvc\.get\(\)[[:space:]]*\.[[:space:]]*uri\(([^)]*)\)/mockMvc.perform(get(\1))/g'
+      
+          echo "[SANITIZE] Finished converting get() calls."
+  
+
       - name: Run unit tests
         if: steps.tests.outputs.has_tests == 'yes'
         run: mvn -B test
