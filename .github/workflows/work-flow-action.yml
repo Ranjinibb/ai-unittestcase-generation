@@ -14,486 +14,155 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout PR branch
-        uses: actions/checkout@v4
+
+      # ----------------------------------------------------
+      # 1. CHECKOUT & JAVA
+      # ----------------------------------------------------
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # full history for clean diffs
 
-      - name: Create Maven folder to satisfy cache
-        run: mkdir -p ~/.m2/repository
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
 
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      # ----------------------------------------------------
+      # 2. AWS CREDENTIALS
+      # ----------------------------------------------------
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::595868460191:role/bedrock_aws
           aws-region: us-east-1
 
+      # ----------------------------------------------------
+      # 3. DETECT CHANGED JAVA FILES (NO git fetch)
+      # ----------------------------------------------------
       - name: Compute changed Java files
         id: changed
-        shell: bash
         run: |
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep '^src/main/java/.*\.java$' || true)
+          BASE=${{ github.event.pull_request.base.sha }}
+          HEAD=${{ github.event.pull_request.head.sha }}
 
-          {
-            echo "changed<<EOF"
-            echo "$CHANGED"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          git diff --name-only "$BASE" "$HEAD" \
+            | grep '^src/main/java/.*\.java$' || true > changed_files.txt
 
-          printf "%s\n" "$CHANGED" > changed_files.txt
-          echo "[DEBUG] Changed sources:"
-          cat changed_files.txt
+          if [ -s changed_files.txt ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            cat changed_files.txt
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No Java source changes."
+          fi
 
-      - name: DEBUG when no changed files
-        if: steps.changed.outputs.changed == ''
-        run: echo "No src/main/java/*.java changes detected in this PR."
-
-      - name: Prepare payload for Lambda
-        if: steps.changed.outputs.changed != ''
-        shell: bash
+      # ----------------------------------------------------
+      # 4. BUILD PAYLOAD FOR LAMBDA
+      # ----------------------------------------------------
+      - name: Prepare Lambda Payload
+        if: steps.changed.outputs.changed == 'true'
         run: |
-          python3 - << 'PY'
-          import json, pathlib, os
+          python3 <<'EOF'
+          import json, pathlib
+          files=[]
+          for p in pathlib.Path("changed_files.txt").read_text().splitlines():
+              content = pathlib.Path(p).read_text()
+              files.append({"path": p, "content": content})
+          pathlib.Path("payload.json").write_text(json.dumps({"files": files}))
+          EOF
 
-          changed = pathlib.Path("changed_files.txt").read_text().strip().splitlines()
-          files = []
-
-          for p in changed:
-            path = pathlib.Path(p)
-            try:
-              files.append({"path": p, "content": path.read_text(encoding="utf-8")})
-            except Exception:
-              pass
-
-          payload = {
-            "repo": os.getenv("GITHUB_REPOSITORY"),
-            "prNumber": int(os.getenv("PR_NUMBER") or 0),
-            "files": files,
-          }
-
-          pathlib.Path("payload.json").write_text(json.dumps(payload))
-          PY
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-
+      # ----------------------------------------------------
+      # 5. INVOKE LAMBDA
+      # ----------------------------------------------------
       - name: Invoke Lambda (generate tests)
-        id: inv
-        if: steps.changed.outputs.changed != ''
-        shell: bash
+        id: lambda
+        if: steps.changed.outputs.changed == 'true'
         run: |
-          set -euo pipefail
-
           aws lambda invoke \
             --function-name ai-test-generator \
             --cli-binary-format raw-in-base64-out \
             --payload file://payload.json \
-            out.json >/dev/null
+            response.json > /dev/null
 
-          echo "==== DEBUG out.json (first 200 chars) ===="
-          head -c 200 out.json || true
-          echo
-          echo "=========================================="
-
-          # Try to extract base64 from several possible shapes of the response
-          ZIP_B64=$(
-            jq -r '
-              # direct
-              .zip_base64 // 
-              # nested object
-              .body.zip_base64 // 
-              # stringified JSON in body
-              (try (.body | fromjson | .zip_base64) catch empty) //
-              empty
-            ' out.json
-          )
-
-          if [ -z "${ZIP_B64:-}" ] || [ "$ZIP_B64" = "null" ]; then
-            echo "[WARN] No zip_base64 found in Lambda response."
-            echo "has_zip=no" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Decode base64 → binary
-          printf "%s" "$ZIP_B64" | base64 -d > generated_tests.bin 2>/dev/null || {
-            echo "[WARN] base64 decode failed."
-            echo "has_zip=no" >> "$GITHUB_OUTPUT"
-            exit 0
-          }
-
-          # Check magic bytes
-          MAGIC=$(head -c 4 generated_tests.bin | hexdump -v -e '/1 "%02X"')
-          echo "[DEBUG] Magic bytes: $MAGIC"
-
-          if [ "$MAGIC" = "504B0304" ]; then
-            mv generated_tests.bin generated_tests.zip
-            echo "archive_type=zip" >> "$GITHUB_OUTPUT"
-            echo "has_zip=yes" >> "$GITHUB_OUTPUT"
-            echo "[INFO] Valid ZIP detected."
-          elif [ "${MAGIC:0:4}" = "1F8B" ]; then
-            mv generated_tests.bin generated_tests.tar.gz
-            echo "archive_type=tgz" >> "$GITHUB_OUTPUT"
-            echo "has_zip=yes" >> "$GITHUB_OUTPUT"
-            echo "[INFO] GZIP archive detected (tar.gz)."
+          ZIP_B64=$(jq -r '.zip_base64' response.json)
+          if [ -n "$ZIP_B64" ] && [ "$ZIP_B64" != "null" ]; then
+            echo "$ZIP_B64" | base64 -d > tests.zip
+            echo "has_zip=yes" >> $GITHUB_OUTPUT
           else
-            echo "[WARN] Unknown archive format (magic=$MAGIC)."
-            echo "has_zip=no" >> "$GITHUB_OUTPUT"
+            echo "has_zip=no" >> $GITHUB_OUTPUT
           fi
 
-      - name: Pretty print Lambda response
-        if: steps.changed.outputs.changed != ''
+      # ----------------------------------------------------
+      # 6. UNZIP INTO src/test/java
+      # ----------------------------------------------------
+      - name: Extract tests
+        if: steps.lambda.outputs.has_zip == 'yes'
         run: |
-          echo "==== Lambda response (jq pretty) ===="
-          jq . out.json || cat out.json
+          rm -rf src/test/java
+          unzip -o tests.zip -d . >/dev/null
 
-      - name: Unpack tests (if any)
-        if: steps.inv.outputs.has_zip == 'yes'
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf gen_out && mkdir -p gen_out src/test/java
-
-          case "${{ steps.inv.outputs.archive_type }}" in
-            zip)
-              unzip -o generated_tests.zip -d gen_out >/dev/null
-              ;;
-            tgz)
-              tar -xzf generated_tests.tar.gz -C gen_out
-              ;;
-            *)
-              echo "[WARN] Unknown archive_type; skipping."
-              exit 0
-              ;;
-          esac
-
-          # Copy tests if present
-          if [ -d gen_out/src/test/java ]; then
-            rsync -a gen_out/src/test/java/ src/test/java/
-          fi
-
-          echo "[DEBUG] src/test/java tree:"
-          ls -R src/test/java || true
-
-      - name: Unpack tests (if any)
-        if: steps.inv.outputs.has_zip == 'yes'
-        shell: bash
-        run: |
-          rm -rf gen_out && mkdir -p gen_out src/test/java
-          unzip -o generated_tests.zip -d gen_out >/dev/null
-
-          if [ -d gen_out/src/test/java ]; then
-            rsync -a gen_out/src/test/java/ src/test/java/
-          fi
-
-          echo "[DEBUG] src/test/java tree:"
-          ls -R src/test/java || true
-
-      - name: Copy generated tests → Maven folder
-        if: steps.inv.outputs.has_zip == 'yes'
-        shell: bash
-        run: |
-          mkdir -p src/test/java
-          find src/test/java -type f -name '*.java' -print -exec bash -c '
-            rel="${1#src/test/java/}"
-            dest="src/test/java/$rel"
-            mkdir -p "$(dirname "$dest")"
-            cp "$1" "$dest"
-          ' _ {} \;
-
-      - name: Sanitize generated tests WebTestClient → MockMvc
-        if: steps.inv.outputs.has_zip == 'yes'
-        shell: bash
-        continue-on-error: true   # do not fail the job if no matches
-        run: |
-          set -euo pipefail
-          [ -d src/test/java ] || { echo "[SANITIZE] No tests"; exit 0; }
-      
-          # 0) Normalize line endings (in case the generator mixed CRLF)
-          find src/test/java -type f -name '*.java' -print0 | xargs -0 -I{} sed -i 's/\r$//' {}
-      
-          # 1) Replace WebTestClient type & import with MockMvc
-          find src/test/java -type f -name '*.java' -print0 | xargs -0 sed -i \
-            -e 's#org.springframework.test.web.reactive.server.WebTestClient#org.springframework.test.web.servlet.MockMvc#g' \
-            -e 's#WebTestClient#MockMvc#g'
-      
-          # 2) Ensure MockMvc static imports (get, status, content) exist; insert after package line if missing
-          for f in $(find src/test/java -type f -name '*.java'); do
-            grep -q 'org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get' "$f" || \
-              sed -i '/^package /a import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;' "$f"
-            grep -q 'org.springframework.test.web.servlet.result.MockMvcResultMatchers.status' "$f" || \
-              sed -i '/^package /a import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;' "$f"
-            grep -q 'org.springframework.test.web.servlet.result.MockMvcResultMatchers.content' "$f" || \
-              sed -i '/^package /a import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;' "$f"
-            grep -q 'org.springframework.test.web.servlet.MockMvc' "$f" || \
-              sed -i '/^package /a import org.springframework.test.web.servlet.MockMvc;' "$f"
-          done
-      
-          # 3) Convert WebTestClient chains to MockMvc.perform(get())
-          #    webTestClient.get().uri("/x").exchange()  -> mockMvc.perform(get("/x"))
-          # Run BEFORE renaming variable to mockMvc so we can match webTestClient.
-          find src/test/java -type f -name '*.java' -print0 | xargs -0 sed -E -i \
-            -e 's#webTestClient[[:space:]]*\.[[:space:]]*get\(\)[[:space:]]*\.[[:space:]]*uri\(([^)]*)\)[[:space:]]*\.[[:space:]]*exchange\(\)#mockMvc.perform(get(\1))#g'
-      
-          # 4) Convert expectations:
-          #    .expectStatus().isOk() -> .andExpect(status().isOk())
-          #    .expectStatus().isNotFound() -> .andExpect(status().isNotFound())
-          find src/test/java -type f -name '*.java' -print0 | xargs -0 sed -E -i \
-            -e 's#\.expectStatus\(\)\.([A-Za-z0-9_]+)\(\)#.andExpect(status().\1())#g'
-      
-          #    .expectBody(String.class).isEqualTo("...") -> .andExpect(content().string("..."))
-          find src/test/java -type f -name '*.java' -print0 | xargs -0 sed -E -i \
-            -e 's#\.expectBody\(\s*String\.class\s*\)\.isEqualTo\(([^)]*)\)#.andExpect(content().string(\1))#g'
-      
-          # 5) Rename variable identifiers webTestClient -> mockMvc (word boundary)
-          find src/test/java -type f -name '*.java' -print0 | xargs -0 sed -E -i 's/\bwebTestClient\b/mockMvc/g'
-      
-          # 6) If using @WebMvcTest, ensure @SpringBootTest is not mixed in the same class
-          for f in $(find src/test/java -type f -name '*.java'); do
-            if grep -q "@WebMvcTest" "$f"; then
-              sed -i '/@SpringBootTest/d' "$f"
-            fi
-          done
-      
-          # 7) Fix wrong AutoConfigureMockMvc import (seen earlier)
-          find src/test/java -type f -name '*.java' -print0 | xargs -0 sed -i \
-            -e 's#org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc#org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc#g'
-      
-          # 8) Brace-balancer: prevent "reached end of file while parsing"
-          for f in $(find src/test/java -type f -name '*.java'); do
-            OPEN=$(grep -o '{' "$f" | wc -l || echo 0)
-            CLOSE=$(grep -o '}' "$f" | wc -l || echo 0)
-            if [ "$OPEN" -gt "$CLOSE" ]; then
-              MISSING=$((OPEN - CLOSE))
-              printf '%*s' "$MISSING" | tr ' ' '}' >> "$f"
-              echo "[SANITIZE] Fixed $MISSING missing brace(s) in $f"
-            fi
-          done
-      
-          echo "[SANITIZE] WebTestClient → MockMvc conversion completed."
-  
-
-      - name: Fix missing closing braces in generated tests
-        if: steps.inv.outputs.has_zip == 'yes'
-        shell: bash
-        run: |
-          for f in $(find src/test/java -name '*.java'); do
-            echo "[BRACE-FIX] Checking $f"
-      
-            OPEN=$(grep -o '{' "$f" | wc -l)
-            CLOSE=$(grep -o '}' "$f" | wc -l)
-      
-            if [ "$OPEN" -gt "$CLOSE" ]; then
-              MISSING=$((OPEN - CLOSE))
-              echo "[BRACE-FIX] File $f is missing $MISSING closing brace(s). Fixing..."
-              printf '%*s' "$MISSING" | tr ' ' '}' >> "$f"
-            fi
-          done
-
-      - name: Remove Markdown fences only
-        shell: bash
-        run: |
-          find src/test/java -type f -name '*.java' -print -exec sed -i '/^```/d' {} \;
-
-      - name: Ensure Maven test folder exists
-        run: mkdir -p src/test/java
-
-      - name: DEBUG - Show structure of src/test/java
-        run: |
-          echo "==== DEBUG src/test/java ===="
-          if [ -d src/test/java ]; then
-            find src/test/java -type f -print
-          else
-            echo "src/test/java DOES NOT EXIST"
-          fi
-
-      - name: DEBUG - Show structure of src/test/java
-        run: |
-          echo "==== DEBUG src/test/java ===="
-          if [ -d src/test/java ]; then
-            find src/test/java -type f -print
-          else
-            echo "src/test/java DOES NOT EXIST"
-          fi
-
-      - name: DEBUG - check untracked files under workspace
-        run: |
-          echo "==== DEBUG git ls-files -o --exclude-standard ===="
-          git ls-files -o --exclude-standard
-
-      # FIXED STEP — CORRECT TEST DETECTION
+      # ----------------------------------------------------
+      # 7. DETECT IF ANY TEST FILES WERE GENERATED
+      # ----------------------------------------------------
       - name: Detect generated tests
         id: tests
-        shell: bash
         run: |
-          git add -A  # Stage changes so diff-index works but DO NOT COMMIT
-
-          NEW_OR_MODIFIED=$(git diff --cached --name-only --diff-filter=AM src/test/java)
-
-          if [ -n "$NEW_OR_MODIFIED" ]; then
-            echo "has_tests=yes" >> "$GITHUB_OUTPUT"
-            echo "[DEBUG] New/updated tests:"
-            echo "$NEW_OR_MODIFIED"
+          if [ -d src/test/java ]; then
+            git add src/test/java
+            if git diff --cached --name-only --diff-filter=AM src/test/java | grep .; then
+              echo "has_tests=yes" >> $GITHUB_OUTPUT
+            else
+              echo "has_tests=no" >> $GITHUB_OUTPUT
+            fi
           else
-            echo "has_tests=no" >> "$GITHUB_OUTPUT"
-            echo "[DEBUG] No new tests."
+            echo "has_tests=no" >> $GITHUB_OUTPUT
           fi
 
-      - name: DEBUG – print failing test file
-        shell: bash
-        run: |
-          echo "===== HelloWorldControllerTest.java ====="
-          sed -n '1,200p' src/test/java/com/example/helloworld/controller/HelloWorldControllerTest.java
-
-      - name: Sanitize Convert bad mockMvc.get() patterns to mockMvc.perform(get())
-        if: steps.inv.outputs.has_zip == 'yes'
-        shell: bash
-        run: |
-          echo "[SANITIZE] Converting WebTestClient-style calls into MockMvc calls..."
-      
-          # Fix patterns like mockMvc.get("/x")
-          find src/test/java -type f -name '*.java' -print0 \
-            | xargs -0 sed -E -i \
-              's/mockMvc\.get\(([^)]*)\)/mockMvc.perform(get(\1))/g'
-      
-          # Fix patterns like mockMvc.get().uri("/x")
-          find src/test/java -type f -name '*.java' -print0 \
-            | xargs -0 sed -E -i \
-              's/mockMvc\.get\(\)[[:space:]]*\.[[:space:]]*uri\(([^)]*)\)/mockMvc.perform(get(\1))/g'
-      
-          echo "[SANITIZE] Finished converting get() calls."
-
-      - name: Fix empty get() calls → get("/hello") or correct URI
-        if: steps.inv.outputs.has_zip == 'yes'
-        shell: bash
-        run: |
-          echo "[SANITIZE] Fixing empty get() calls..."
-      
-          # 1) Replace get() used without argument with a placeholder URL pattern
-          #    If uri("/x") exists earlier in same method, extract it.
-          for f in $(find src/test/java -type f -name '*.java'); do
-            # Fix lines like: mockMvc.perform(get())
-            sed -i 's/mockMvc\.perform(get())/mockMvc.perform(get("\/hello"))/g' "$f"
-      
-            # Fix bare get()
-            sed -i 's/get()/get("\/hello")/g' "$f"
-          done
-      
-          echo "[SANITIZE] Empty get() calls fixed."
-
+      # ----------------------------------------------------
+      # 8. RUN UNIT TESTS
+      # ----------------------------------------------------
       - name: Run unit tests
         if: steps.tests.outputs.has_tests == 'yes'
         run: mvn -B test
 
-      - name: Show Java & Maven environment
+      # ----------------------------------------------------
+      # 9. UPLOAD SUREFIRE REPORTS
+      # ----------------------------------------------------
+      - uses: actions/upload-artifact@v4
         if: always()
-        run: |
-          echo "===== JAVA & MAVEN ====="
-          java -version
-          mvn -version
-          locale || true
-          date -Iseconds
-          uname -a
-
-      - name: Dump surefire reports to logs
-        if: always()
-        run: |
-          echo "===== SUREFIRE REPORTS (TXT first 200 lines) ====="
-          if [ -d target/surefire-reports ]; then
-            find target/surefire-reports -maxdepth 1 -type f -name '*.txt' -print -exec sed -n '1,200p' {} \;
-            echo "===== FAILURES/ERRORS GREP ====="
-            grep -RIn "<<< FAILURE!" target/surefire-reports || true
-            grep -RIn "<<< ERROR!" target/surefire-reports || true
-          else
-            echo "No surefire-reports directory found."
-          fi
-
-      - name: Upload surefire-reports
-        if: always()
-        uses: actions/upload-artifact@v4
         with:
-          # Make it unique for each job and rerun attempt
-          name: surefire-reports-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          name: surefire-${{ github.run_id }}-${{ github.run_attempt }}
           path: target/surefire-reports
           if-no-files-found: warn
-          retention-days: 7
 
-      - name: Dump surefire summary to logs
-        if: always()
-        run: |
-          echo "==== SUREFIRE TXT REPORTS ===="
-          if [ -d target/surefire-reports ]; then
-            # Print brief summaries first
-            find target/surefire-reports -type f -name '*.txt' -maxdepth 1 -print -exec sed -n '1,200p' {} \;
-            echo "==== FAILED TEST OUTPUTS (if any) ===="
-            # Often helpful: show first failing stack traces from .txt files
-            grep -RIn "<<< FAILURE!" target/surefire-reports || true
-            grep -RIn "<<< ERROR!" target/surefire-reports || true
-          else
-            echo "No surefire-reports directory found."
-          fi
-
-      - name: Upload surefire-reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: surefire-reports-${{ github.run_id }}
-          path: target/surefire-reports
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: Stage all test changes
-        run: git add -A
-
-      - name: Create Bot PR with generated tests
+      # ----------------------------------------------------
+      # 10. CREATE BOT PR FOR THE TESTS
+      # ----------------------------------------------------
+      - name: Commit test changes
         if: steps.tests.outputs.has_tests == 'yes'
-        id: cpr
+        run: git add src/test/java
+
+      - name: Create Bot PR
+        if: steps.tests.outputs.has_tests == 'yes'
         uses: peter-evans/create-pull-request@v8
         with:
-          commit-message: "test(ai): add generated unit tests"
-          title: "AI: Generated unit tests for PR #${{ github.event.pull_request.number }}"
-          body: |
-            This PR adds **AI-generated unit tests** for Java files changed in PR #${{ github.event.pull_request.number }}.
-            - Generated by AWS Lambda (Bedrock)
-            - Validated with Maven
+          commit-message: "test(ai): add generated tests"
+          title: "AI: Generated tests for PR #${{ github.event.pull_request.number }}"
           base: ${{ github.event.pull_request.base.ref }}
           branch: ai/tests/pr-${{ github.event.pull_request.number }}
-          branch-suffix: timestamp
-          add-paths: |
-            src/test/java
-            src/test/java/**
-          delete-branch: true
+          add-paths: src/test/java/**
 
-      - name: Comment result on original PR (PR created)
-        if: steps.tests.outputs.has_tests == 'yes' && steps.cpr.outputs.pull-request-number != ''
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const pr = context.payload.pull_request.number;
-            const url = '${{ steps.cpr.outputs.pull-request-url }}';
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: pr,
-              body: `✅ AI-generated unit tests created.\n🔗 Bot PR: ${url}`
-            });
-
-      - name: Comment no-op on PR (no tests)
+      # ----------------------------------------------------
+      # 11. COMMENT BACK ON ORIGINAL PR
+      # ----------------------------------------------------
+      - name: Comment - No tests generated
         if: steps.tests.outputs.has_tests != 'yes'
         uses: actions/github-script@v7
         with:
           script: |
-            const pr = context.payload.pull_request.number;
-            await github.rest.issues.createComment({
+            github.rest.issues.createComment({
+              issue_number: context.payload.pull_request.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: pr,
-              body: `ℹ️ No AI tests generated for this PR (no eligible changes or no output).`
-            });
+              body: "ℹ️ No AI tests generated for this PR."
+            })

@@ -26,5 +26,10 @@ public class HelloWorldController1 {
         return "Hello, World!";
     }
 
+    @GetMapping("/hell4")
+    public String sendGreetings4() {
+        return "Hello, World!";
+    }
+
 
 }
