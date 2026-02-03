@@ -208,44 +208,65 @@ jobs:
             cp "$1" "$dest"
           ' _ {} \;
 
-      - name: Sanitize generated tests (MVC vs WebFlux, imports, braces)
+      - name: Sanitize generated tests WebTestClient → MockMvc
         if: steps.inv.outputs.has_zip == 'yes'
         shell: bash
+        continue-on-error: true   # do not fail the job if no matches
         run: |
           set -euo pipefail
-          if [ ! -d "src/test/java" ]; then
-            echo "[SANITIZE] No tests to sanitize."
-            exit 0
-          fi
+          [ -d src/test/java ] || { echo "[SANITIZE] No tests"; exit 0; }
       
-          echo "[SANITIZE] Rewriting WebTestClient -> MockMvc (if any) and fixing imports/annotations..."
+          # 0) Normalize line endings (in case the generator mixed CRLF)
+          find src/test/java -type f -name '*.java' -print0 | xargs -0 -I{} sed -i 's/\r$//' {}
       
-          # 1) Replace WebTestClient with MockMvc (class names and imports)
-          find src/test/java -type f -name '*.java' -print0 \
-            | xargs -0 sed -i \
-              -e 's#org.springframework.test.web.reactive.server.WebTestClient#org.springframework.test.web.servlet.MockMvc#g' \
-              -e 's#WebTestClient#MockMvc#g'
+          # 1) Replace WebTestClient type & import with MockMvc
+          find src/test/java -type f -name '*.java' -print0 | xargs -0 sed -i \
+            -e 's#org.springframework.test.web.reactive.server.WebTestClient#org.springframework.test.web.servlet.MockMvc#g' \
+            -e 's#WebTestClient#MockMvc#g'
       
-          # 2) Fix wrong AutoConfigureMockMvc import (generator sometimes uses mock.mockito)
-          find src/test/java -type f -name '*.java' -print0 \
-            | xargs -0 sed -i \
-              -e 's#org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc#org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc#g'
+          # 2) Ensure MockMvc static imports (get, status, content) exist; insert after package line if missing
+          for f in $(find src/test/java -type f -name '*.java'); do
+            grep -q 'org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get' "$f" || \
+              sed -i '/^package /a import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;' "$f"
+            grep -q 'org.springframework.test.web.servlet.result.MockMvcResultMatchers.status' "$f" || \
+              sed -i '/^package /a import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;' "$f"
+            grep -q 'org.springframework.test.web.servlet.result.MockMvcResultMatchers.content' "$f" || \
+              sed -i '/^package /a import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;' "$f"
+            grep -q 'org.springframework.test.web.servlet.MockMvc' "$f" || \
+              sed -i '/^package /a import org.springframework.test.web.servlet.MockMvc;' "$f"
+          done
       
-          # 3) If a test uses @WebMvcTest, drop any @SpringBootTest on the same class (they should not be mixed)
+          # 3) Convert WebTestClient chains to MockMvc.perform(get())
+          #    webTestClient.get().uri("/x").exchange()  -> mockMvc.perform(get("/x"))
+          # Run BEFORE renaming variable to mockMvc so we can match webTestClient.
+          find src/test/java -type f -name '*.java' -print0 | xargs -0 sed -E -i \
+            -e 's#webTestClient[[:space:]]*\.[[:space:]]*get\(\)[[:space:]]*\.[[:space:]]*uri\(([^)]*)\)[[:space:]]*\.[[:space:]]*exchange\(\)#mockMvc.perform(get(\1))#g'
+      
+          # 4) Convert expectations:
+          #    .expectStatus().isOk() -> .andExpect(status().isOk())
+          #    .expectStatus().isNotFound() -> .andExpect(status().isNotFound())
+          find src/test/java -type f -name '*.java' -print0 | xargs -0 sed -E -i \
+            -e 's#\.expectStatus\(\)\.([A-Za-z0-9_]+)\(\)#.andExpect(status().\1())#g'
+      
+          #    .expectBody(String.class).isEqualTo("...") -> .andExpect(content().string("..."))
+          find src/test/java -type f -name '*.java' -print0 | xargs -0 sed -E -i \
+            -e 's#\.expectBody\(\s*String\.class\s*\)\.isEqualTo\(([^)]*)\)#.andExpect(content().string(\1))#g'
+      
+          # 5) Rename variable identifiers webTestClient -> mockMvc (word boundary)
+          find src/test/java -type f -name '*.java' -print0 | xargs -0 sed -E -i 's/\bwebTestClient\b/mockMvc/g'
+      
+          # 6) If using @WebMvcTest, ensure @SpringBootTest is not mixed in the same class
           for f in $(find src/test/java -type f -name '*.java'); do
             if grep -q "@WebMvcTest" "$f"; then
               sed -i '/@SpringBootTest/d' "$f"
-              # Ensure we have the proper MockMvc import when using WebMvcTest
-              if ! grep -q "org.springframework.test.web.servlet.MockMvc" "$f"; then
-                sed -i '/^package /a import org.springframework.test.web.servlet.MockMvc;' "$f"
-              fi
             fi
           done
       
-          # 4) Ensure imports appear AFTER the package line (avoid invalid top-of-file insertions)
-          # (No-op here since we use '/^package /a' above; included as a reminder)
+          # 7) Fix wrong AutoConfigureMockMvc import (seen earlier)
+          find src/test/java -type f -name '*.java' -print0 | xargs -0 sed -i \
+            -e 's#org.springframework.boot.test.mock.mockito.AutoConfigureMockMvc#org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc#g'
       
-          # 5) Fix missing closing braces — prevents "reached end of file while parsing"
+          # 8) Brace-balancer: prevent "reached end of file while parsing"
           for f in $(find src/test/java -type f -name '*.java'); do
             OPEN=$(grep -o '{' "$f" | wc -l || echo 0)
             CLOSE=$(grep -o '}' "$f" | wc -l || echo 0)
@@ -256,7 +277,7 @@ jobs:
             fi
           done
       
-          echo "[SANITIZE] Completed."
+          echo "[SANITIZE] WebTestClient → MockMvc conversion completed."
   
 
       - name: Fix missing closing braces in generated tests
