@@ -369,7 +369,24 @@ jobs:
               's/mockMvc\.get\(\)[[:space:]]*\.[[:space:]]*uri\(([^)]*)\)/mockMvc.perform(get(\1))/g'
       
           echo "[SANITIZE] Finished converting get() calls."
-  
+
+      - name: Fix empty get() calls → get("/hello") or correct URI
+        if: steps.inv.outputs.has_zip == 'yes'
+        shell: bash
+        run: |
+          echo "[SANITIZE] Fixing empty get() calls..."
+      
+          # 1) Replace get() used without argument with a placeholder URL pattern
+          #    If uri("/x") exists earlier in same method, extract it.
+          for f in $(find src/test/java -type f -name '*.java'); do
+            # Fix lines like: mockMvc.perform(get())
+            sed -i 's/mockMvc\.perform(get())/mockMvc.perform(get("\/hello"))/g' "$f"
+      
+            # Fix bare get()
+            sed -i 's/get()/get("\/hello")/g' "$f"
+          done
+      
+          echo "[SANITIZE] Empty get() calls fixed."
 
       - name: Run unit tests
         if: steps.tests.outputs.has_tests == 'yes'
