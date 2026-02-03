@@ -15,37 +15,44 @@ public class HelloWorldControllerTest {
     private MockMvc mockMvc;
 
     @Test
-    public void testSendGreetings() throws Exception {
+    public void testHello() throws Exception {
         mockMvc.perform(get("/hello"))
                .andExpect(status().isOk())
-               .andExpect(content().string("Hello, World!"));
+                .andExpect(content().string("Hello, World!"));
     }
 
     @Test
-    public void testSendGreetings1() throws Exception {
+    public void testHello1() throws Exception {
         mockMvc.perform(get("/hello1"))
-               .andExpect(status().isOk())
+                .andExpect(status().isOk())
                .andExpect(content().string("Hello, World!"));
     }
 
     @Test
-    public void testSendGreetings2() throws Exception {
+    public void testHello2() throws Exception {
         mockMvc.perform(get("/hello2"))
-               .andExpect(status().isOk())
+                .andExpect(status().isOk())
                .andExpect(content().string("Hello, World!"));
     }
 
     @Test
-    public void testSendGreetings3() throws Exception {
+    public void testHello3() throws Exception {
         mockMvc.perform(get("/hello3"))
-               .andExpect(status().isOk())
+                .andExpect(status().isOk())
                .andExpect(content().string("Hello, World!"));
     }
 
     @Test
-    public void testSendGreetings4() throws Exception {
+    public void testHello4() throws Exception {
         mockMvc.perform(get("/hello4"))
-               .andExpect(status().isOk())
+                .andExpect(status().isOk())
+               .andExpect(content().string("Hello, World!"));
+    }
+
+    @Test
+    public void testHello5() throws Exception {
+        mockMvc.perform(get("/hello5"))
+                .andExpect(status().isOk())
                .andExpect(content().string("Hello, World!"));
     }
 }
