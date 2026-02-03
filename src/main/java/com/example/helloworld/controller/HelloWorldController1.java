@@ -4,24 +4,24 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-public class HelloWorldController {
+public class HelloWorldController1 {
 
-    @GetMapping("/hello")
+    @GetMapping("/hell")
     public String sendGreetings() {
         return "Hello, World!";
     }
 
-    @GetMapping("/hello1")
+    @GetMapping("/hell1")
     public String sendGreetings1() {
         return "Hello, World!";
     }
 
-    @GetMapping("/hello2")
+    @GetMapping("/hell2")
     public String sendGreetings2() {
         return "Hello, World!";
     }
 
-    @GetMapping("/hello3")
+    @GetMapping("/hell3")
     public String sendGreetings3() {
         return "Hello, World!";
     }
