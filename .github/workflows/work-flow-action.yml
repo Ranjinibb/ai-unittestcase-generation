@@ -352,7 +352,7 @@ jobs:
           echo "===== HelloWorldControllerTest.java ====="
           sed -n '1,200p' src/test/java/com/example/helloworld/controller/HelloWorldControllerTest.java
 
-      - name: Sanitize: Convert bad mockMvc.get() patterns to mockMvc.perform(get())
+      - name: Sanitize Convert bad mockMvc.get() patterns to mockMvc.perform(get())
         if: steps.inv.outputs.has_zip == 'yes'
         shell: bash
         run: |
