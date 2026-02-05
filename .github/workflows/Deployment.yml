@@ -48,7 +48,7 @@ jobs:
     - name: Download and clean task definition
       run: |
         # Download and remove metadata fields that cause registration errors
-        aws ecs describe-task-definition --task-definition springboot --query taskDefinition > raw-td.json
+        aws ecs describe-task-definition --task-definition spring-boot-dev --query taskDefinition > raw-td.json
         jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy, .enableFaultInjection)' raw-td.json > task-definition.json
 
     - name: Fill in the new image ID in the Amazon ECS task definition
