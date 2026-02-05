@@ -21,10 +21,6 @@ public class HelloWorldSecondController {
         return "sendGreetingsTwo!";
     }
 
-    @GetMapping("/sendGreetingsThree")
-    public String sendGreetingsThree() {
-        return "sendGreetingsThree!";
-    }
 
 
 }
