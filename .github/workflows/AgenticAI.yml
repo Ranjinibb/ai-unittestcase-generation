@@ -3,7 +3,7 @@ name: AI PR Review
 
 on:
   workflow_run:
-    workflows: [ "generate-unittest" ]
+    workflows: [ "AI Unit Tests (Java - Lambda)" ]
     types: [ completed ]
 
 
