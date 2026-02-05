@@ -46,7 +46,7 @@ jobs:
           HEAD=${{ github.event.pull_request.head.sha }}
 
           git diff --name-only "$BASE" "$HEAD" \
-            | grep '^src/main/java/.*\.java$' || true > changed_files.txt
+            | grep '^src/main/java/.*\.java$' > changed_files.txt || true
 
           if [ -s changed_files.txt ]; then
             echo "changed=true" >> $GITHUB_OUTPUT
