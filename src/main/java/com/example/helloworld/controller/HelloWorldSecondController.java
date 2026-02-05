@@ -21,6 +21,11 @@ public class HelloWorldSecondController {
         return "sendGreetingsTwo!";
     }
 
+    @GetMapping("/sendGreetingsThree")
+    public String sendGreetingsTwo() {
+        return "sendGreetingsTwo! I am the newly added method";
+    }
+
 
 
 }
