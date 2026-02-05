@@ -8,30 +8,30 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 
-@WebMvcTest(controllers = HelloWorldController.class)
-public class HelloWorldControllerTest {
+@WebMvcTest(controllers = HelloWorldSecondController.class)
+public class HelloWorldSecondControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
 
     @Test
-    public void testHelloWorld() throws Exception {
-        mockMvc.perform(get("/helloWorld"))
+    public void testSendGreetings() throws Exception {
+        mockMvc.perform(get("/sendGreetings"))
               .andExpect(status().isOk())
-              .andExpect(content().string("Hello, World!"));
+              .andExpect(content().string("sendGreetings!"));
     }
 
     @Test
-    public void testHelloWorldOne() throws Exception {
-        mockMvc.perform(get("/helloWorldOne"))
-               .andExpect(status().isOk())
-               .andExpect(content().string("Hello, World!"));
+    public void testSendGreetingsOne() throws Exception {
+        mockMvc.perform(get("/sendGreetingsOne"))
+              .andExpect(status().isOk())
+               .andExpect(content().string("sendGreetingsOne!"));
     }
 
     @Test
-    public void testHelloWorldTwo() throws Exception {
-        mockMvc.perform(get("/helloWorldTwo"))
+    public void testSendGreetingsTwo() throws Exception {
+        mockMvc.perform(get("/sendGreetingsTwo"))
                .andExpect(status().isOk())
-               .andExpect(content().string("Hello, World!"));
+               .andExpect(content().string("sendGreetingsTwo!"));
     }
 }
