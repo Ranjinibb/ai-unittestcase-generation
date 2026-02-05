@@ -7,7 +7,7 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: dev/ai-unittest
-  ECS_SERVICE: spring-boot-dev
+  ECS_SERVICE: spring-boot-dev-service-pqo8m9in
   ECS_CLUSTER: spring-boot-dev-cluster
   CONTAINER_NAME: spring-boot-dev
 
