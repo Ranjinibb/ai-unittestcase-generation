@@ -6,33 +6,18 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class HelloWorldController {
 
-    @GetMapping("/hello")
-    public String sendGreetings() {
+    @GetMapping("/helloWorld")
+    public String helloWorld() {
         return "Hello, World!";
     }
 
-    @GetMapping("/hello1")
-    public String sendGreetings1() {
+    @GetMapping("/helloWorldOne")
+    public String helloWorldOne() {
         return "Hello, World!";
     }
 
-    @GetMapping("/hello2")
-    public String sendGreetings2() {
-        return "Hello, World!";
-    }
-
-    @GetMapping("/hello3")
-    public String sendGreetings3() {
-        return "Hello, World!";
-    }
-
-    @GetMapping("/hello4")
-    public String sendGreetings4() {
-        return "Hello, World!";
-    }
-
-    @GetMapping("/hello5")
-    public String sendGreetings5() {
+    @GetMapping("/helloWorldTwo")
+    public String helloWorldTwo() {
         return "Hello, World!";
     }
 
