@@ -1,10 +1,10 @@
 name: AI PR Review
 
 
-#on:
-  #workflow_run:
-   # workflows: [ "work-flow-action" ]
-    #types: [ completed ]
+on:
+  workflow_run:
+    workflows: [ "AI Unit Tests (Java - Lambda)" ]
+    types: [ completed ]
 
 
 permissions:
