@@ -22,7 +22,7 @@ public class HelloWorldSecondController {
     }
 
     @GetMapping("/sendGreetingsThree")
-    public String sendGreetingsTwo() {
+    public String sendGreetingsThree() {
         return "sendGreetingsTwo! I am the newly added method";
     }
 
