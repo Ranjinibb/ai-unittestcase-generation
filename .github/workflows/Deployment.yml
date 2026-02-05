@@ -9,7 +9,7 @@ env:
   ECR_REPOSITORY: dev/ai-unittest
   ECS_SERVICE: spring-boot-dev
   ECS_CLUSTER: spring-boot-dev-cluster
-  CONTAINER_NAME: helloworld
+  CONTAINER_NAME: spring-boot-dev
 
 permissions:
   contents: read
