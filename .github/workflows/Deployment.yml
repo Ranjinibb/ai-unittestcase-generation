@@ -7,7 +7,7 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: dev/ai-unittest
-  ECS_SERVICE: springboot-service-anhd7994
+  ECS_SERVICE: spring-boot-dev
   ECS_CLUSTER: spring-boot-dev-cluster
   CONTAINER_NAME: helloworld
 
