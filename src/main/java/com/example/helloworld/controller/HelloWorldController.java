@@ -21,5 +21,10 @@ public class HelloWorldController {
         return "Hello, World!";
     }
 
+    @GetMapping("/helloWorldThree")
+    public String helloWorldThree() {
+        return "Hello, World!";
+    }
+
 
 }

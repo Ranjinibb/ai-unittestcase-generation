@@ -1,0 +1,77 @@
+name: AI PR Review
+
+
+#on:
+  #workflow_run:
+   # workflows: [ "work-flow-action" ]
+    #types: [ completed ]
+
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+  issues: write
+
+jobs:
+  # This is the "job name" you will select in your Branch Protection rules
+  review:
+    runs-on: [self-hosted, linux, X64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get PR Diff
+        run: |
+           gh pr diff ${{ github.event.pull_request.number }} > diff.txt
+           cat diff.txt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Who am I?
+        run: aws sts get-caller-identity
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+
+      - name: Call Lambda Reviewer
+        id: invoke_lambda_step # Added ID to reference this step if needed later
+        run: |
+          # Read diff as a JSON-safe string
+          DIFF_JSON=$(jq -Rs . < diff.txt)
+
+          # Build payload (parse the JSON-encoded diff into a real string field)
+          payload=$(jq -n \
+            --arg repo "${{ github.repository }}" \
+            --arg token "${{ secrets.GITHUB_TOKEN }}" \
+            --argjson pr ${{ github.event.pull_request.number }} \
+            --arg diff_json "$DIFF_JSON" \
+            '{diff: ($diff_json | fromjson), repo: $repo, pr_number: $pr, github_token: $token}')
+
+          # Invoke Lambda and save raw output to response.json
+          aws lambda invoke \
+            --function-name BedrockPRReviewer \
+            --cli-binary-format raw-in-base64-out \
+            --payload "$payload" \
+            --region "${{ secrets.AWS_REGION }}" \
+            response.json
+          
+          # Extract the review content for logging
+          echo "----- Agent Review -----"
+          jq -r '.review // empty' response.json
+          echo "------------------------"
+
+          # *** CRITICAL ADDITION: Check the verdict and exit accordingly ***
+          VERDICT=$(jq -r '.verdict // "FAIL"' response.json)
+          if [ "$VERDICT" == "FAIL" ]; then
+              echo "❌ Guardrail verdict failed. Blocking merge."
+              exit 1 # Fails the GitHub Action job
+          else
+              echo "✅ Guardrail verdict passed. Merge allowed."
+          fi
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
