@@ -33,7 +33,7 @@ jobs:
       # ----------------------------------------------------
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::595868460191:role/bedrock_aws
+          role-to-assume: arn:aws:iam::595868460191:role/demo-unittest-github-oidc
           aws-region: us-east-1
 
       # ----------------------------------------------------
