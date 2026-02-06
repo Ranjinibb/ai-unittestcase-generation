@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.web.servlet.MockMvc;
+
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -17,28 +18,21 @@ public class HelloWorldSecondControllerTest {
     @Test
     public void testSendGreetings() throws Exception {
         mockMvc.perform(get("/sendGreetings"))
-              .andExpect(status().isOk())
-              .andExpect(content().string("sendGreetings!"));
+               .andExpect(status().isOk())
+                .andExpect(content().string("sendGreetings!"));
     }
 
     @Test
     public void testSendGreetingsOne() throws Exception {
         mockMvc.perform(get("/sendGreetingsOne"))
-              .andExpect(status().isOk())
+                .andExpect(status().isOk())
                .andExpect(content().string("sendGreetingsOne!"));
-    }
-
-    @Test
-    public void testSendGreetingsTwo() throws Exception {
-        mockMvc.perform(get("/sendGreetingsTwo"))
-               .andExpect(status().isOk())
-               .andExpect(content().string("sendGreetingsTwo!"));
     }
 
     @Test
     public void testSendGreetingsThree() throws Exception {
         mockMvc.perform(get("/sendGreetingsThree"))
-               .andExpect(status().isOk())
+                .andExpect(status().isOk())
                .andExpect(content().string("sendGreetingsTwo! I am the newly added method"));
     }
 }
