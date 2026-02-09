@@ -18,7 +18,7 @@ public class HelloWorldSecondControllerTest {
     public void testSendGreetings() throws Exception {
         mockMvc.perform(get("/sendGreetings"))
               .andExpect(status().isOk())
-               .andExpect(content().string("sendGreetings!"));
+              .andExpect(content().string("sendGreetings!"));
     }
 
     @Test
@@ -33,5 +33,12 @@ public class HelloWorldSecondControllerTest {
         mockMvc.perform(get("/sendGreetingsTwo"))
                .andExpect(status().isOk())
                .andExpect(content().string("sendGreetingsOne!"));
+    }
+
+    @Test
+    public void testSendGreetingsThree() throws Exception {
+        mockMvc.perform(get("/sendGreetingsThree"))
+               .andExpect(status().isOk())
+               .andExpect(content().string("I am the method created now for demo!"));
     }
 }
