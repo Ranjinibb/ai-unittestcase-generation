@@ -8,23 +8,23 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 
-@WebMvcTest(controllers = HelloWorldSecondController.class)
-public class HelloWorldSecondControllerTest {
+@WebMvcTest(controllers = HelloWorldController.class)
+public class HelloWorldControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
 
     @Test
-    public void testSendGreetings() throws Exception {
-        mockMvc.perform(get("/sendGreetings"))
+    public void testHelloWorld() throws Exception {
+        mockMvc.perform(get("/helloWorld"))
               .andExpect(status().isOk())
-               .andExpect(content().string("sendGreetings!"));
+               .andExpect(content().string("Hello, World!"));
     }
 
     @Test
-    public void testSendGreetingsOne() throws Exception {
-        mockMvc.perform(get("/sendGreetingsOne"))
-              .andExpect(status().isOk())
-               .andExpect(content().string("sendGreetingsOne!"));
+    public void testHelloWorldOne() throws Exception {
+        mockMvc.perform(get("/helloWorldOne"))
+               .andExpect(status().isOk())
+               .andExpect(content().string("Hello, World!"));
     }
 }
