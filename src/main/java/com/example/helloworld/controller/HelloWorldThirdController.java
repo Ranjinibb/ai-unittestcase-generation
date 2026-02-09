@@ -4,19 +4,19 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-public class HelloWorldSecondController {
+public class HelloWorldThirdController {
 
-    @GetMapping("/sendGreetings")
+    @GetMapping("/thirdCtrl")
     public String sendGreetings() {
         return "sendGreetings!";
     }
 
-    @GetMapping("/sendGreetingsOne")
+    @GetMapping("/thirdCtrlOne")
     public String sendGreetingsOne() {
         return "sendGreetingsOne!";
     }
 
-    @GetMapping("/sendGreetingsTwo")
+    @GetMapping("/thirdCtrlTwo")
     public String sendGreetingsTwo() {
         return "sendGreetingsOne!";
     }
