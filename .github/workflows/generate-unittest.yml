@@ -142,15 +142,28 @@ jobs:
         if: steps.tests.outputs.has_tests == 'yes'
         run: git add src/test/java
 
-      - name: Create Bot PR
+      #- name: Create Bot PR
+       # if: steps.tests.outputs.has_tests == 'yes'
+        #uses: peter-evans/create-pull-request@v8
+        #with:
+         # commit-message: "test(ai): add generated tests"
+          #title: "AI: Generated tests for PR #${{ github.event.pull_request.number }}"
+          #base: ${{ github.event.pull_request.base.ref }}
+          #branch: ai/tests/pr-${{ github.event.pull_request.number }}
+          #add-paths: src/test/java/**
+
+      - name: Commit and push to the same PR branch
         if: steps.tests.outputs.has_tests == 'yes'
-        uses: peter-evans/create-pull-request@v8
-        with:
-          commit-message: "test(ai): add generated tests"
-          title: "AI: Generated tests for PR #${{ github.event.pull_request.number }}"
-          base: ${{ github.event.pull_request.base.ref }}
-          branch: ai/tests/pr-${{ github.event.pull_request.number }}
-          add-paths: src/test/java/**
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/test/java/**
+          if ! git diff --cached --quiet; then
+            git commit -m "test(ai): add generated tests"
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          else
+            echo "No changes to commit."
+          fi
 
       # ----------------------------------------------------
       # 11. COMMENT BACK ON ORIGINAL PR
