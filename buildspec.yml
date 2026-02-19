@@ -1,0 +1,26 @@
+version: 0.2
+
+env:
+  variables:
+    AWS_REGION: "${AWS_REGION}"
+  parameter-store:
+  # Optional: add vars from SSM Parameter Store if needed
+phases:
+  pre_build:
+    commands:
+      - echo "Logging in to Amazon ECR..."
+      - aws --region $AWS_REGION ecr get-login-password | docker login --username AWS --password-stdin ${ECR_REPO_URI%/*}
+      - IMAGE_TAG=${COMMIT_SHA:-latest}
+      - echo "IMAGE_TAG=${IMAGE_TAG}"
+  build:
+    commands:
+      - echo "Building Docker image..."
+      - docker build -t ${ECR_REPO_URI}:${IMAGE_TAG} .
+  post_build:
+    commands:
+      - echo "Pushing Docker image..."
+      - docker push ${ECR_REPO_URI}:${IMAGE_TAG}
+      - echo "{\"imageUri\":\"${ECR_REPO_URI}:${IMAGE_TAG}\"}" > image.json
+artifacts:
+  files:
+    - image.json
