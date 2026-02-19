@@ -18,7 +18,7 @@ public class HelloWorldControllerTest {
     public void testHelloWorld() throws Exception {
         mockMvc.perform(get("/helloWorld"))
               .andExpect(status().isOk())
-              .andExpect(content().string("Hello, World!"));
+               .andExpect(content().string("Hello, World!"));
     }
 
     @Test
@@ -33,5 +33,12 @@ public class HelloWorldControllerTest {
         mockMvc.perform(get("/helloWorldTwo"))
                .andExpect(status().isOk())
                .andExpect(content().string("Hello, World!"));
+    }
+
+    @Test
+    public void testHelloWorldThree() throws Exception {
+        mockMvc.perform(get("/helloWorldThree"))
+               .andExpect(status().isOk())
+               .andExpect(content().string("I am the method created now for demo!"));
     }
 }
