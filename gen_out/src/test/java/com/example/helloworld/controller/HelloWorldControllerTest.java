@@ -44,4 +44,3 @@ public class HelloWorldControllerTest {
         assertThat(response.getBody()).isEqualTo("Hello, World!");
     }
 }
-```
