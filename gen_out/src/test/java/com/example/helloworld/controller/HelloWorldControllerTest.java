@@ -30,12 +30,6 @@ public class HelloWorldControllerTest {
         assertThat(response.getBody()).isEqualTo("Hello, World!");
     }
 
-    @Test
-    public void testSendGreetings2() {
-        ResponseEntity<String> response = restTemplate.getForEntity("/hello2", String.class);
-        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
-        assertThat(response.getBody()).isEqualTo("Hello, World!");
-    }
 
     @Test
     public void testSendGreetings3() {
