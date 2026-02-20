@@ -1,56 +1,30 @@
-name: Agent Orchestrated Build & Deploy (ECS)
+name: Build & Deploy via Lambda Agent
 
 on:
   push:
     branches: [ "main" ]
 
-env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECR_REPO_URI: ${{ secrets.ECR_REPO_URI }}
-  ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
-  ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
-  AGENT_URL: ${{ secrets.AGENT_URL }}
-
 jobs:
-  trigger-agent-build:
+  build-trigger:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Agent to Build (CodeBuild → ECR)
+      - name: Trigger Build (pipelineStart Lambda)
         run: |
-          curl -sS -X POST \
+          curl -X POST \
             -H "Authorization: Bearer ${{ secrets.AGENT_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d "{
-                  \"repository\": \"${{ github.repository }}\",
-                  \"commit\": \"${{ github.sha }}\",
-                  \"codebuild_project\": \"myapp-codebuild\",
-                  \"ecr_repo_uri\": \"${{ env.ECR_REPO_URI }}\",
-                  \"aws_region\": \"${{ env.AWS_REGION }}\"
-                }" \
-            ${AGENT_URL}/pipeline/start
+            -d "{\"commit\": \"${{ github.sha }}\"}" \
+            ${{ secrets.AGENT_URL_PIPELINE }}
 
-      - name: (Optional) Notify build started
-        if: ${{ success() }}
-        run: echo "Build started via Agent for commit ${{ github.sha }}"
-
-  approve-and-deploy:
-    needs: trigger-agent-build
+  deploy:
+    needs: build-trigger
     runs-on: ubuntu-latest
-    environment: production   # <-- This enforces manual approval in GitHub
+    environment: production  # <-- human approval here
     steps:
-      - name: Deploy via Agent (ECS rollout)
+      - name: Deploy via Lambda (deployToECS)
         run: |
-          curl -sS -X POST \
+          curl -X POST \
             -H "Authorization: Bearer ${{ secrets.AGENT_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d "{
-                  \"cluster\": \"${{ env.ECS_CLUSTER }}\",
-                  \"service\": \"${{ env.ECS_SERVICE }}\",
-                  \"commit\": \"${{ github.sha }}\",
-                  \"ecr_repo_uri\": \"${{ env.ECR_REPO_URI }}\"
-                }" \
-            ${AGENT_URL}/deploy
-
-      - name: (Optional) Notify deployment finished
-        if: ${{ success() }}
-        run: echo "Deployment completed for commit ${{ github.sha }}"
+            -d "{\"commit\": \"${{ github.sha }}\"}" \
+            ${{ secrets.AGENT_URL_DEPLOY }}
