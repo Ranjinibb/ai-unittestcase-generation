@@ -46,17 +46,19 @@ jobs:
           docker build -t $ECR_REPO_URI:$IMAGE_TAG .
           docker push $ECR_REPO_URI:$IMAGE_TAG
 
-      - name: Invoke Entry Lambda (dry run)
+      - name: Invoke Entry Lambda (entry-only dry run)
         env:
-          AWS_REGION: ${{ env.AWS_REGION }}
+          AWS_REGION: us-east-1
           LAMBDA_NAME: rabb-entry-lambda
+          S3_BUCKET: rabb-ci-artifacts-us-east-1
         run: |
           set -euo pipefail
+          set -x
 
           PAYLOAD=$(jq -n \
-            --arg repo "${{ github.repository }}" \
-            --arg sha  "${{ github.sha }}" \
-            --arg corr "gh-${{ github.run_id }}-${{ github.run_attempt }}" \
+            --arg repo "Ranjinibb/ai-unittestcase-generation" \
+            --arg sha  "bab9b9ba015db1200cffbbb004895ecad23a601a" \
+            --arg corr "gh-22260317087-1" \
             --argjson dry true \
             '{repository:$repo, commit:$sha, dryRun:$dry, correlationId:$corr}')
 
@@ -84,10 +86,10 @@ jobs:
           BODY_JSON="$(jq -r '.body | fromjson? // . // {}' /tmp/resp.json)"
           echo "Parsed body:"; echo "$BODY_JSON" | jq .
 
-          STATUS="$(echo "$BODY_JSON" | jq -r '.status // empty')"
-          DID_DEPLOY="$(echo "$BODY_JSON" | jq -r '.didDeploy // empty')"
-
-          if [ "$STATUS" != "ok" ] || [ "$DID_DEPLOY" != "false" ]; then
-            echo "::error::Entry test failed. Expected status=ok & didDeploy=false."
+          # ✅ jq-based assertion (type-safe)
+          if ! echo "$BODY_JSON" | jq -e 'select(.status=="ok" and .didDeploy==false)' >/dev/null; then
+            echo "::error::Entry test failed. Expected status=ok & didDeploy=false. BODY=$BODY_JSON"
             exit 1
           fi
+
+          echo "✅ Entry Lambda dry run OK."
