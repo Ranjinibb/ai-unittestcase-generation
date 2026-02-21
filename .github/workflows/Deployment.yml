@@ -46,17 +46,33 @@ jobs:
           docker build -t $ECR_REPO_URI:$IMAGE_TAG .
           docker push $ECR_REPO_URI:$IMAGE_TAG
 
-      - name: Invoke Entry Lambda (deploy only)
+      - name: Invoke Entry Lambda (calls Bedrock Agent)
         run: |
           set -euo pipefail
           PAYLOAD=$(jq -n \
             --arg repo "${{ github.repository }}" \
             --arg sha  "${{ github.sha }}" \
-            '{repository:$repo, commit:$sha}')
+            --arg s3b  "${{ env.S3_BUCKET }}" \
+            --arg s3k  "${S3_KEY}" \
+            '{repository:$repo, commit:$sha, s3Object:{bucket:$s3b, key:$s3k}}')
           aws lambda invoke \
             --function-name rabb-entry-lambda \
             --payload "$PAYLOAD" \
             --cli-binary-format raw-in-base64-out \
             /tmp/resp.json
-          cat /tmp/resp.json && echo
-          # ... keep the STATUS validation block from section B ...
+          echo "Raw response:"; cat /tmp/resp.json; echo
+
+          BODY=$(jq -r '.body // empty' /tmp/resp.json)
+          # BODY can be a JSON string or object; normalize
+          if echo "$BODY" | jq empty >/dev/null 2>&1; then
+            STATUS=$(echo "$BODY" | jq -r '.status // empty')
+          else
+            UNWRAPPED=$(echo "$BODY" | sed -e 's/^"//' -e 's/"$//')
+            STATUS=$(echo "$UNWRAPPED" | jq -r '.status // empty' 2>/dev/null || echo "")
+          fi
+
+          echo "Parsed status: ${STATUS:-<empty>}"
+          if [ "$STATUS" != "deployed" ]; then
+            echo "::error::Deploy not confirmed. BODY=$BODY"
+            exit 1
+          fi
