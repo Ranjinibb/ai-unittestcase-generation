@@ -22,8 +22,8 @@ public class HelloWorldController {
     }
 
 
-    @GetMapping("/helloWorldThree")
-    public String helloWorldThree() {
+    @GetMapping("/helloWorldFour")
+    public String helloWorldFour() {
         return "I am the method created now for demo!";
     }
 
