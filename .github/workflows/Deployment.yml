@@ -46,33 +46,48 @@ jobs:
           docker build -t $ECR_REPO_URI:$IMAGE_TAG .
           docker push $ECR_REPO_URI:$IMAGE_TAG
 
-      - name: Invoke Entry Lambda (calls Bedrock Agent)
+      - name: Invoke Entry Lambda (dry run)
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          LAMBDA_NAME: rabb-entry-lambda
         run: |
           set -euo pipefail
+
           PAYLOAD=$(jq -n \
             --arg repo "${{ github.repository }}" \
             --arg sha  "${{ github.sha }}" \
-            --arg s3b  "${{ env.S3_BUCKET }}" \
-            --arg s3k  "${S3_KEY}" \
-            '{repository:$repo, commit:$sha, s3Object:{bucket:$s3b, key:$s3k}}')
-          aws lambda invoke \
-            --function-name rabb-entry-lambda \
+            --arg corr "gh-${{ github.run_id }}-${{ github.run_attempt }}" \
+            --argjson dry true \
+            '{repository:$repo, commit:$sha, dryRun:$dry, correlationId:$corr}')
+
+          INVOKE_OUT=$(aws --region "$AWS_REGION" lambda invoke \
+            --function-name "$LAMBDA_NAME" \
             --payload "$PAYLOAD" \
             --cli-binary-format raw-in-base64-out \
-            /tmp/resp.json
-          echo "Raw response:"; cat /tmp/resp.json; echo
+            --log-type Tail \
+            /tmp/resp.json)
 
-          BODY=$(jq -r '.body // empty' /tmp/resp.json)
-          # BODY can be a JSON string or object; normalize
-          if echo "$BODY" | jq empty >/dev/null 2>&1; then
-            STATUS=$(echo "$BODY" | jq -r '.status // empty')
-          else
-            UNWRAPPED=$(echo "$BODY" | sed -e 's/^"//' -e 's/"$//')
-            STATUS=$(echo "$UNWRAPPED" | jq -r '.status // empty' 2>/dev/null || echo "")
+          echo "$INVOKE_OUT" | jq .
+          LOGS_BASE64=$(echo "$INVOKE_OUT" | jq -r '.LogResult // empty')
+          if [ -n "$LOGS_BASE64" ] && [ "$LOGS_BASE64" != "null" ]; then
+            echo "------- Lambda Logs -------"
+            echo "$LOGS_BASE64" | base64 --decode || true
+            echo "---------------------------"
           fi
 
-          echo "Parsed status: ${STATUS:-<empty>}"
-          if [ "$STATUS" != "deployed" ]; then
-            echo "::error::Deploy not confirmed. BODY=$BODY"
+          # Guard empty/null
+          if ! [ -s /tmp/resp.json ]; then
+            echo "::error::Lambda returned empty response"
+            exit 1
+          fi
+
+          BODY_JSON="$(jq -r '.body | fromjson? // . // {}' /tmp/resp.json)"
+          echo "Parsed body:"; echo "$BODY_JSON" | jq .
+
+          STATUS="$(echo "$BODY_JSON" | jq -r '.status // empty')"
+          DID_DEPLOY="$(echo "$BODY_JSON" | jq -r '.didDeploy // empty')"
+
+          if [ "$STATUS" != "ok" ] || [ "$DID_DEPLOY" != "false" ]; then
+            echo "::error::Entry test failed. Expected status=ok & didDeploy=false."
             exit 1
           fi
