@@ -34,6 +34,18 @@ jobs:
           aws s3 cp source.zip "s3://${{ env.S3_BUCKET }}/${KEY}"
           echo "S3_KEY=${KEY}" >> "$GITHUB_ENV"
 
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push Docker image
+        env:
+          ECR_REPO_URI: ${{ secrets.ECR_REPO_URI }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker build -t $ECR_REPO_URI:$IMAGE_TAG .
+          docker push $ECR_REPO_URI:$IMAGE_TAG
+
       - name: Invoke Entry Lambda (calls Bedrock Agent)
         run: |
           set -euo pipefail
