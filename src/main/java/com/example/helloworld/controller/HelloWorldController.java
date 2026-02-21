@@ -22,7 +22,7 @@ public class HelloWorldController {
     }
 
 
-    @GetMapping("/helloWorldFour")
+    @GetMapping("/helloWorldFive")
     public String helloWorldFour() {
         return "I am the method created now for demo!";
     }
