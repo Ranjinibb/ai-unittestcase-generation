@@ -1,0 +1,60 @@
+name: Build & Deploy via Lambda Agent
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  AWS_REGION: us-east-1  # change if you deploy in another region
+
+jobs:
+  build-and-push:
+    name: Build & Push Image to ECR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push Docker image
+        env:
+          ECR_REPO_URI: ${{ secrets.ECR_REPO_URI }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo "Building $ECR_REPO_URI:$IMAGE_TAG"
+          docker build -t $ECR_REPO_URI:$IMAGE_TAG .
+          docker push $ECR_REPO_URI:$IMAGE_TAG
+          echo "Pushed $ECR_REPO_URI:$IMAGE_TAG"
+
+  deploy:
+    name: Human Approval → Deploy via Lambda
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: production   # <-- This triggers the manual approval gate
+    steps:
+      - name: Deploy via Lambda (deployToECS)
+        env:
+          AGENT_URL_DEPLOY: ${{ secrets.AGENT_URL_DEPLOY }}
+          AGENT_TOKEN: ${{ secrets.AGENT_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo "Deploying commit: $COMMIT_SHA"
+          curl -sS -v --fail-with-body \
+            -X POST \
+            -H "Authorization: Bearer ${AGENT_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"commit\": \"${COMMIT_SHA}\"}" \
+            "${AGENT_URL_DEPLOY}"
+          echo "Deployment request sent."

@@ -1,20 +1,24 @@
-name: Build & Deploy via Lambda Agent
-
+name: AI Agent Deploy (Bedrock)
 on:
   push:
     branches: [ "main" ]
 
 env:
-  AWS_REGION: us-east-1  # change if you deploy in another region
+  AWS_REGION: us-east-1
+  S3_BUCKET: my-ci-artifacts-us-east-1
 
 jobs:
-  build-and-push:
-    name: Build & Push Image to ECR
+  package-and-invoke:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Archive source
+        run: |
+          set -e
+          git rev-parse HEAD > GIT_SHA
+          zip -r source.zip . -x ".git/*"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -23,38 +27,26 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build & Push Docker image
-        env:
-          ECR_REPO_URI: ${{ secrets.ECR_REPO_URI }}
-          IMAGE_TAG: ${{ github.sha }}
+      - name: Upload source to S3
         run: |
-          set -euo pipefail
-          echo "Building $ECR_REPO_URI:$IMAGE_TAG"
-          docker build -t $ECR_REPO_URI:$IMAGE_TAG .
-          docker push $ECR_REPO_URI:$IMAGE_TAG
-          echo "Pushed $ECR_REPO_URI:$IMAGE_TAG"
+          set -e
+          KEY="sources/${{ github.repository }}/main/${{ github.sha }}.zip"
+          aws s3 cp source.zip "s3://${{ env.S3_BUCKET }}/${KEY}"
+          echo "S3_KEY=${KEY}" >> $GITHUB_ENV
 
-  deploy:
-    name: Human Approval → Deploy via Lambda
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    environment: production   # <-- This triggers the manual approval gate
-    steps:
-      - name: Deploy via Lambda (deployToECS)
-        env:
-          AGENT_URL_DEPLOY: ${{ secrets.AGENT_URL_DEPLOY }}
-          AGENT_TOKEN: ${{ secrets.AGENT_TOKEN }}
-          COMMIT_SHA: ${{ github.sha }}
+      - name: Invoke Entry Lambda (calls Bedrock Agent)
         run: |
-          set -euo pipefail
-          echo "Deploying commit: $COMMIT_SHA"
-          curl -sS -v --fail-with-body \
-            -X POST \
-            -H "Authorization: Bearer ${AGENT_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d "{\"commit\": \"${COMMIT_SHA}\"}" \
-            "${AGENT_URL_DEPLOY}"
-          echo "Deployment request sent."
+          set -e
+          PAYLOAD=$(jq -n \
+            --arg repo "${{ github.repository }}" \
+            --arg sha  "${{ github.sha }}" \
+            --arg s3b  "${{ env.S3_BUCKET }}" \
+            --arg s3k  "${{ env.S3_BUCKET }}/$S3_KEY" \
+            '{repository:$repo, commit:$sha, s3Object:{bucket:$s3b, key:$S3_KEY}}' \
+          )
+          aws lambda invoke \
+            --function-name ai-bedrock-deploy-entry \
+            --payload "$PAYLOAD" \
+            --cli-binary-format raw-in-base64-out \
+            /tmp/resp.json
+          cat /tmp/resp.json && echo

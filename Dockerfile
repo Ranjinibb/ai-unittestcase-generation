@@ -8,5 +8,17 @@ RUN mvn clean package -DskipTests
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
-EXPOSE 9099
+
+# Install wget for health checks
+RUN apk add --no-cache wget
+
+# Expose application port
+EXPOSE 8080
+
+# --- Health Check ---
+# Uses wget to check if the app responds on /actuator/health
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=10 \
+  CMD wget -qO- http://localhost:8080/actuator/health || exit 1
+
+# Start the app
 ENTRYPOINT ["java", "-jar", "app.jar"]
