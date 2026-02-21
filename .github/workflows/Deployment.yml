@@ -46,7 +46,7 @@ jobs:
             '{repository:$repo, commit:$sha, s3Object:{bucket:$s3b, key:$s3k}}' \
           )
           aws lambda invoke \
-            --function-name ai-bedrock-deploy-entry \
+            --function-name rabb-entry-lambda \
             --payload "$PAYLOAD" \
             --cli-binary-format raw-in-base64-out \
             /tmp/resp.json
