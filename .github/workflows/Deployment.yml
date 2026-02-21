@@ -5,7 +5,7 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  S3_BUCKET: my-ci-artifacts-us-east-1
+  S3_BUCKET: rabb-ci-artifacts-us-east-1
 
 jobs:
   package-and-invoke:
