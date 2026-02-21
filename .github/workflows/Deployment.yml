@@ -1,11 +1,27 @@
 name: AI Agent Deploy (Bedrock)
+
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      deploy_mode:
+        description: "dryrun (entry-only) or live"
+        required: false
+        default: "dryrun"
+        type: choice
+        options:
+          - dryrun
+          - live
 
 env:
   AWS_REGION: us-east-1
   S3_BUCKET: rabb-ci-artifacts-us-east-1
+  LAMBDA_NAME: rabb-entry-lambda
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   package-and-invoke:
@@ -13,25 +29,35 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Archive source
         run: |
-          set -e
+          set -euo pipefail
           git rev-parse HEAD > GIT_SHA
           zip -r source.zip . -x ".git/*"
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      # --- AWS Auth (OIDC) ---
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}  # e.g., arn:aws:iam::<acct>:role/github-actions-deploy
           aws-region: ${{ env.AWS_REGION }}
+
+      # If you must use static keys, comment the step above and uncomment below:
+      # - name: Configure AWS credentials (static keys)
+      #   uses: aws-actions/configure-aws-credentials@v2
+      #   with:
+      #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #     aws-region: ${{ env.AWS_REGION }}
 
       - name: Upload source to S3
         run: |
           set -euo pipefail
           KEY="sources/${{ github.repository }}/main/${{ github.sha }}.zip"
-          aws s3 cp source.zip "s3://${{ env.S3_BUCKET }}/${KEY}"
+          aws --region "$AWS_REGION" s3 cp source.zip "s3://${S3_BUCKET}/${KEY}"
           echo "S3_KEY=${KEY}" >> "$GITHUB_ENV"
 
       - name: Login to Amazon ECR
@@ -43,36 +69,62 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           set -euo pipefail
-          docker build -t $ECR_REPO_URI:$IMAGE_TAG .
-          docker push $ECR_REPO_URI:$IMAGE_TAG
+          docker build -t "$ECR_REPO_URI:$IMAGE_TAG" .
+          docker push "$ECR_REPO_URI:$IMAGE_TAG"
 
       - name: Invoke Entry Lambda (calls Bedrock Agent)
+        env:
+          DEPLOY_MODE: ${{ github.event.inputs.deploy_mode || 'dryrun' }}
         run: |
           set -euo pipefail
+
+          # Construct payload
+          if [ "${DEPLOY_MODE}" = "dryrun" ]; then
+            DRYRUN=true
+          else
+            DRYRUN=false
+          fi
+
           PAYLOAD=$(jq -n \
             --arg repo "${{ github.repository }}" \
             --arg sha  "${{ github.sha }}" \
-            --arg s3b  "${{ env.S3_BUCKET }}" \
+            --arg s3b  "${S3_BUCKET}" \
             --arg s3k  "${S3_KEY}" \
-            '{repository:$repo, commit:$sha, s3Object:{bucket:$s3b, key:$s3k}}')
-          aws lambda invoke \
-            --function-name rabb-entry-lambda \
+            --argjson dry "${DRYRUN}" \
+            '{repository:$repo, commit:$sha, s3Object:{bucket:$s3b, key:$s3k}, dryRun:$dry}')
+
+          echo "Invoking ${LAMBDA_NAME} (mode=${DEPLOY_MODE}) with payload:"
+          echo "$PAYLOAD" | jq .
+
+          aws --region "$AWS_REGION" lambda invoke \
+            --function-name "${LAMBDA_NAME}" \
             --payload "$PAYLOAD" \
             --cli-binary-format raw-in-base64-out \
             /tmp/resp.json
+
           echo "Raw response:"; cat /tmp/resp.json; echo
 
-          BODY=$(jq -r '.body // empty' /tmp/resp.json)
-          # BODY can be a JSON string or object; normalize
-          if echo "$BODY" | jq empty >/dev/null 2>&1; then
-            STATUS=$(echo "$BODY" | jq -r '.status // empty')
-          else
-            UNWRAPPED=$(echo "$BODY" | sed -e 's/^"//' -e 's/"$//')
-            STATUS=$(echo "$UNWRAPPED" | jq -r '.status // empty' 2>/dev/null || echo "")
-          fi
+          # Extract parsed body and fields (handle stringified body)
+          BODY_JSON="$(jq -r '.body | fromjson? // . // {}' /tmp/resp.json)"
+          echo "Parsed body:"; echo "$BODY_JSON" | jq .
 
-          echo "Parsed status: ${STATUS:-<empty>}"
-          if [ "$STATUS" != "deployed" ]; then
-            echo "::error::Deploy not confirmed. BODY=$BODY"
-            exit 1
+          STATUS="$(echo "$BODY_JSON" | jq -r '.status // empty')"
+          DID_DEPLOY="$(echo "$BODY_JSON" | jq -r '.didDeploy // empty')"
+
+          echo "Parsed status: ${STATUS:-<empty>}, didDeploy: ${DID_DEPLOY:-<empty>}"
+
+          if [ "${DEPLOY_MODE}" = "dryrun" ]; then
+            # In entry-only tests, we expect OK and no deploy
+            if [ "$STATUS" != "ok" ] || [ "$DID_DEPLOY" != "false" ]; then
+              echo "::error::Entry test failed. Expected status=ok and didDeploy=false. BODY=$BODY_JSON"
+              exit 1
+            fi
+            echo "✅ Entry Lambda dry run OK."
+          else
+            # Live mode expects actual deployed
+            if [ "$STATUS" != "deployed" ] || [ "$DID_DEPLOY" != "true" ]; then
+              echo "::error::Deploy not confirmed. BODY=$BODY_JSON"
+              exit 1
+            fi
+            echo "✅ Live deploy confirmed."
           fi
