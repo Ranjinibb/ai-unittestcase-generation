@@ -29,20 +29,21 @@ jobs:
 
       - name: Upload source to S3
         run: |
-          set -e
+          set -euo pipefail
           KEY="sources/${{ github.repository }}/main/${{ github.sha }}.zip"
           aws s3 cp source.zip "s3://${{ env.S3_BUCKET }}/${KEY}"
-          echo "S3_KEY=${KEY}" >> $GITHUB_ENV
+          echo "S3_KEY=${KEY}" >> "$GITHUB_ENV"
 
       - name: Invoke Entry Lambda (calls Bedrock Agent)
         run: |
-          set -e
+          set -euo pipefail
+          # Bind ALL jq vars you reference
           PAYLOAD=$(jq -n \
             --arg repo "${{ github.repository }}" \
             --arg sha  "${{ github.sha }}" \
             --arg s3b  "${{ env.S3_BUCKET }}" \
-            --arg s3k  "${{ env.S3_BUCKET }}/$S3_KEY" \
-            '{repository:$repo, commit:$sha, s3Object:{bucket:$s3b, key:$S3_KEY}}' \
+            --arg s3k  "${S3_KEY}" \
+            '{repository:$repo, commit:$sha, s3Object:{bucket:$s3b, key:$s3k}}' \
           )
           aws lambda invoke \
             --function-name ai-bedrock-deploy-entry \
