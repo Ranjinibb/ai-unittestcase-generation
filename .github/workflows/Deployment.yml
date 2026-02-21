@@ -46,20 +46,17 @@ jobs:
           docker build -t $ECR_REPO_URI:$IMAGE_TAG .
           docker push $ECR_REPO_URI:$IMAGE_TAG
 
-      - name: Invoke Entry Lambda (calls Bedrock Agent)
+      - name: Invoke Entry Lambda (deploy only)
         run: |
           set -euo pipefail
-          # Bind ALL jq vars you reference
           PAYLOAD=$(jq -n \
             --arg repo "${{ github.repository }}" \
             --arg sha  "${{ github.sha }}" \
-            --arg s3b  "${{ env.S3_BUCKET }}" \
-            --arg s3k  "${S3_KEY}" \
-            '{repository:$repo, commit:$sha, s3Object:{bucket:$s3b, key:$s3k}}' \
-          )
+            '{repository:$repo, commit:$sha}')
           aws lambda invoke \
             --function-name rabb-entry-lambda \
             --payload "$PAYLOAD" \
             --cli-binary-format raw-in-base64-out \
             /tmp/resp.json
           cat /tmp/resp.json && echo
+          # ... keep the STATUS validation block from section B ...
